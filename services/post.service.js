@@ -1,6 +1,9 @@
 const postRepository = require('../repositories/post.repo');
 const interactionRepository = require('../repositories/interaction.repo');
 const Post = require('../models/Post');
+const moderationRepository = require('../repositories/moderation.repo');
+const userRepository = require('../repositories/user.repo');
+const notificationService = require('./notification.service');
 
 class PostService {
   async createPost(user_id, data) {
@@ -11,79 +14,86 @@ class PostService {
 
     const titleForSlug = data.title || bodyText.slice(0, 20) || 'post';
     
-    // Analyze content with AI (gộp title + nội dung để phân tích chính xác hơn)
+    // Analyze content with AI (combine title + content for more accurate analysis)
     const aiService = require('./ai.service');
     const analyzeText = [data.title || '', bodyText].filter(Boolean).join(' ').trim();
     const aiResult = await aiService.analyze(analyzeText);
     const { spam_score, toxicity_score, label } = aiResult;
     
+    const isFlagged = label === 'SPAM' || label === 'TOXIC' || label === 'AI_UNAVAILABLE';
+
     const postData = {
       ...data,
       author: user_id,
-      slug: titleForSlug.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now(),
+      slug: this.generateUniqueSlug(titleForSlug),
       content_json: data.content_json,
       content_html: data.content_html,
       tags: data.tags || [],
       reading_time: readingTime,
       is_sensitive: false,
-      // Ẩn hoàn toàn nếu AI phát hiện SPAM hoặc TOXIC — chờ admin duyệt
-      visibility: (label === 'SPAM' || label === 'TOXIC') ? 'HIDDEN' : (data.visibility || 'PUBLIC')
+      // Hide completely if AI flags as SPAM, TOXIC, or AI_UNAVAILABLE — wait for admin review
+      visibility: isFlagged ? 'HIDDEN' : (data.visibility || 'PUBLIC')
     };
 
     const newPost = await postRepository.create(postData);
 
-    // If AI flags as SPAM or TOXIC, push to ModerationQueue
-    if (label === 'SPAM' || label === 'TOXIC') {
-      const moderationRepository = require('../repositories/moderation.repo');
-      const userRepository = require('../repositories/user.repo');
-      const notificationService = require('./notification.service');
+    // If AI flags as SPAM, TOXIC, or AI_UNAVAILABLE, push to ModerationQueue
+    if (isFlagged) {
+      const reason = label === 'AI_UNAVAILABLE' 
+        ? 'AI moderation service unavailable - queued for manual review' 
+        : `AI detected ${label} (spam: ${spam_score}, toxicity: ${toxicity_score})`;
 
       await moderationRepository.addToQueue({
+        target_type: label,
         target_id: newPost._id,
         target_model: 'Post',
-        reason: `AI Flagged as ${label}`,
+        reason,
         spam_score,
         toxicity_score,
-        status: 'PENDING'
+        status: 'PENDING',
+        reporter_id: null
       });
 
-      // Update user violation stats
-      const user = await userRepository.findById(user_id);
-      if (user) {
-        let { spamCount, toxicCount } = user;
-        if (label === 'SPAM') spamCount += 1;
-        if (label === 'TOXIC') toxicCount += 1;
-        const violationScore = (spamCount * 1) + (toxicCount * 3);
+      // Update user violation stats atomically (only for SPAM/TOXIC, not AI_UNAVAILABLE)
+      if (label === 'SPAM' || label === 'TOXIC') {
+        const spamDelta = label === 'SPAM' ? 1 : 0;
+        const toxicDelta = label === 'TOXIC' ? 1 : 0;
         
-        let status = user.status;
-        if (status !== 'BANNED') {
-          if (violationScore >= 10) status = 'BANNED';
-          else if (violationScore >= 5) status = 'WARNING';
+        // Atomically increment violation counts
+        const updatedUser = await userRepository.incrementViolations(user_id, spamDelta, toxicDelta);
+        
+        if (updatedUser) {
+          let status = updatedUser.status;
+          if (status !== 'BANNED') {
+            if (updatedUser.violationScore >= 10) status = 'BANNED';
+            else if (updatedUser.violationScore >= 5) status = 'WARNING';
+          }
+          
+          if (status !== updatedUser.status) {
+            await userRepository.update(user_id, { status });
+          }
         }
 
-        await userRepository.update(user_id, { spamCount, toxicCount, violationScore, status });
+        // Send system notification to user
+        const contentPreview = [
+          data.title && data.title !== 'No Title' ? data.title : '',
+          bodyText.slice(0, 200)
+        ].filter(Boolean).join('\n').trim();
+
+        await notificationService.sendSystemNotification({
+          recipient: user_id,
+          type: 'AI_MODERATION',
+          entity_id: newPost._id,
+          entity_model: 'Post',
+          metadata: {
+            ai_label: label,
+            target_model: 'Post',
+            spam_score,
+            toxicity_score,
+            content_preview: contentPreview.slice(0, 300)
+          }
+        });
       }
-
-      // Gửi thông báo hệ thống cho user
-      // Tạo preview nội dung để user nhớ lại họ đã viết gì
-      const contentPreview = [
-        data.title && data.title !== 'No Title' ? data.title : '',
-        bodyText.slice(0, 200)
-      ].filter(Boolean).join('\n').trim();
-
-      await notificationService.sendSystemNotification({
-        recipient: user_id,
-        type: 'AI_MODERATION',
-        entity_id: newPost._id,
-        entity_model: 'Post',
-        metadata: {
-          ai_label: label,
-          target_model: 'Post',
-          spam_score,
-          toxicity_score,
-          content_preview: contentPreview.slice(0, 300)  // nội dung gốc user viết
-        }
-      });
     }
 
     return newPost;
@@ -259,6 +269,13 @@ class PostService {
 
   async countPosts(query) {
     return Post.countDocuments(query);
+  }
+
+  generateUniqueSlug(baseTitle) {
+    const baseSlug = baseTitle.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 8);
+    return `${baseSlug}-${timestamp}-${random}`;
   }
 }
 

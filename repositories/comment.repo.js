@@ -6,7 +6,7 @@ class CommentRepository {
   }
 
   async findById(id) {
-    return Comment.findById(id);
+    return Comment.findById(id).populate('author', 'username avatar');
   }
 
   async findByPostId(post_id, skip = 0, limit = 20) {
@@ -19,6 +19,10 @@ class CommentRepository {
 
   async update(id, updateData) {
     return Comment.findByIdAndUpdate(id, updateData, { new: true });
+  }
+
+  async updateHidden(id, is_hidden) {
+    return Comment.findByIdAndUpdate(id, { is_hidden }, { new: true });
   }
 }
 

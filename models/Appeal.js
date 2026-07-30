@@ -10,7 +10,7 @@ const appealSchema = new mongoose.Schema(
     target_model: { type: String, enum: ['Post', 'Comment'], required: true },
 
     // Lý do AI flag
-    ai_label: { type: String, enum: ['SPAM', 'TOXIC'], required: true },
+    ai_label: { type: String, enum: ['SPAM', 'TOXIC', 'AI_UNAVAILABLE'], required: true },
     ai_spam_score: { type: Number, default: 0 },
     ai_toxicity_score: { type: Number, default: 0 },
 

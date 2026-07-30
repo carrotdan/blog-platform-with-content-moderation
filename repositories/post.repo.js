@@ -60,6 +60,10 @@ class PostRepository {
   async findOne(query) {
     return Post.findOne(query);
   }
+
+  async updateVisibility(id, visibility) {
+    return Post.findByIdAndUpdate(id, { visibility }, { new: true });
+  }
 }
 
 module.exports = new PostRepository();

@@ -2,6 +2,7 @@ const commentRepository = require('../repositories/comment.repo');
 const moderationRepository = require('../repositories/moderation.repo');
 const userRepository = require('../repositories/user.repo');
 const aiService = require('./ai.service');
+const notificationService = require('./notification.service');
 
 class CommentService {
   async createComment(user_id, data) {
@@ -11,7 +12,8 @@ class CommentService {
     const aiResult = await aiService.analyze(content);
     const { spam_score, toxicity_score, label } = aiResult;
     
-    const is_hidden = label === 'SPAM' || label === 'TOXIC'; // ẩn cả SPAM lẫn TOXIC
+    const isFlagged = label === 'SPAM' || label === 'TOXIC' || label === 'AI_UNAVAILABLE';
+    const is_hidden = isFlagged;
     
     let depth = 0;
     if (parent_id) {
@@ -36,7 +38,6 @@ class CommentService {
     const newComment = await commentRepository.create(commentData);
 
     // Notification Logic
-    const notificationService = require('./notification.service');
     const Post = require('../models/Post');
     
     if (parent_id) {
@@ -65,15 +66,21 @@ class CommentService {
       }
     }
 
-    // If AI flags as SPAM or TOXIC, push to ModerationQueue & ModerationLog
-    if (label === 'SPAM' || label === 'TOXIC') {
+    // If AI flags as SPAM, TOXIC, or AI_UNAVAILABLE, push to ModerationQueue & ModerationLog
+    if (isFlagged) {
+      const reason = label === 'AI_UNAVAILABLE' 
+        ? 'AI moderation service unavailable - queued for manual review' 
+        : `AI detected ${label} (spam: ${spam_score}, toxicity: ${toxicity_score})`;
+
       await moderationRepository.addToQueue({
+        target_type: label,
         target_id: newComment._id,
         target_model: 'Comment',
-        reason: `AI Flagged as ${label}`,
+        reason,
         spam_score,
         toxicity_score,
-        status: 'PENDING'
+        status: 'PENDING',
+        reporter_id: null
       });
 
       await moderationRepository.createLog({
@@ -83,38 +90,40 @@ class CommentService {
         reason: `Auto-queued by AI with label ${label}`
       });
 
-      // Update user violation stats
-      const user = await userRepository.findById(user_id);
-      if (user) {
-        let { spamCount, toxicCount } = user;
-        if (label === 'SPAM') spamCount += 1;
-        if (label === 'TOXIC') toxicCount += 1;
-        const violationScore = (spamCount * 1) + (toxicCount * 3); // Example scoring
+      // Update user violation stats atomically (only for SPAM/TOXIC, not AI_UNAVAILABLE)
+      if (label === 'SPAM' || label === 'TOXIC') {
+        const spamDelta = label === 'SPAM' ? 1 : 0;
+        const toxicDelta = label === 'TOXIC' ? 1 : 0;
         
-        // Auto-status updates based on score
-        let status = user.status;
-        if (status !== 'BANNED') {
-          if (violationScore >= 10) status = 'BANNED';
-          else if (violationScore >= 5) status = 'WARNING';
+        const updatedUser = await userRepository.incrementViolations(user_id, spamDelta, toxicDelta);
+        
+        if (updatedUser) {
+          let status = updatedUser.status;
+          if (status !== 'BANNED') {
+            if (updatedUser.violationScore >= 10) status = 'BANNED';
+            else if (updatedUser.violationScore >= 5) status = 'WARNING';
+          }
+          
+          if (status !== updatedUser.status) {
+            await userRepository.update(user_id, { status });
+          }
         }
 
-        await userRepository.update(user_id, { spamCount, toxicCount, violationScore, status });
+        // Send system notification to user
+        await notificationService.sendSystemNotification({
+          recipient: user_id,
+          type: 'AI_MODERATION',
+          entity_id: newComment._id,
+          entity_model: 'Comment',
+          metadata: {
+            ai_label: label,
+            target_model: 'Comment',
+            spam_score,
+            toxicity_score,
+            content_preview: content.slice(0, 300)
+          }
+        });
       }
-
-      // Gửi thông báo hệ thống cho user
-      await notificationService.sendSystemNotification({
-        recipient: user_id,
-        type: 'AI_MODERATION',
-        entity_id: newComment._id,
-        entity_model: 'Comment',
-        metadata: {
-          ai_label: label,
-          target_model: 'Comment',
-          spam_score,
-          toxicity_score,
-          content_preview: content.slice(0, 300)  // nội dung bình luận gốc
-        }
-      });
     }
 
     return newComment;

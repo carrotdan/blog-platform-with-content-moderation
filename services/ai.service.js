@@ -48,18 +48,19 @@ class AIService {
 
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.warn('[AIService] Request timed out, falling back to NORMAL');
+        console.warn('[AIService] Request timed out - failing closed');
       } else if (error.code === 'ECONNREFUSED' || error.cause?.code === 'ECONNREFUSED') {
-        console.warn('[AIService] Python service unavailable (ECONNREFUSED), falling back to NORMAL');
+        console.warn('[AIService] Python service unavailable (ECONNREFUSED) - failing closed');
       } else {
         console.error('[AIService] Error calling AI microservice:', error.message);
       }
 
-      // Fallback: nếu service không khả dụng, trả về NORMAL để không block user
+      // Fail-closed: if AI service unavailable, treat as potentially harmful
+      // Return special label to indicate AI was unavailable, so content gets HIDDEN + queued
       return {
-        spam_score: 0.1,
-        toxicity_score: 0.1,
-        label: 'NORMAL'
+        spam_score: 0.5,
+        toxicity_score: 0.5,
+        label: 'AI_UNAVAILABLE'
       };
     }
   }

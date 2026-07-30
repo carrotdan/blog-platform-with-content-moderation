@@ -1,83 +1,98 @@
 const appealRepository = require('../repositories/appeal.repo');
+const moderationRepository = require('../repositories/moderation.repo');
+const postRepository = require('../repositories/post.repo');
+const commentRepository = require('../repositories/comment.repo');
+const userRepository = require('../repositories/user.repo');
+const notificationService = require('./notification.service');
+const Post = require('../models/Post');
+const Comment = require('../models/Comment');
 
 class AppealService {
-  /**
-   * User gửi kháng cáo về nội dung bị AI flag
-   */
   async createAppeal(user_id, data) {
-    const { target_id, target_model, ai_label, ai_spam_score, ai_toxicity_score, reason } = data;
+    const { target_id, target_model, reason, ai_label, ai_spam_score, ai_toxicity_score } = data;
 
-    // Kiểm tra đã kháng cáo chưa
+    if (!target_id || !target_model || !reason) {
+      throw new Error('Thiếu thông tin: target_id, target_model, reason là bắt buộc');
+    }
+
+    if (!['Post', 'Comment'].includes(target_model)) {
+      throw new Error('target_model không hợp lệ (chỉ Post hoặc Comment)');
+    }
+
+    if (!['SPAM', 'TOXIC', 'AI_UNAVAILABLE'].includes(ai_label)) {
+      throw new Error('ai_label không hợp lệ (chỉ SPAM, TOXIC, AI_UNAVAILABLE)');
+    }
+
     const existing = await appealRepository.findExisting(user_id, target_id);
     if (existing) {
-      throw new Error('Bạn đã gửi kháng cáo cho nội dung này và đang chờ xem xét.');
+      throw new Error('Bạn đã kháng cáo nội dung này và đang chờ xử lý');
+    }
+
+    const target = target_model === 'Post'
+      ? await postRepository.findById(target_id)
+      : await commentRepository.findById(target_id);
+
+    if (!target) {
+      throw new Error('Nội dung không tồn tại');
+    }
+
+    if (target_model === 'Post' && target.visibility !== 'HIDDEN') {
+      throw new Error('Chỉ có thể kháng cáo bài viết đang bị ẩn');
+    }
+    if (target_model === 'Comment' && !target.is_hidden) {
+      throw new Error('Chỉ có thể kháng cáo bình luận đang bị ẩn');
     }
 
     const appeal = await appealRepository.create({
       user_id,
       target_id,
       target_model,
+      reason,
       ai_label,
       ai_spam_score: ai_spam_score || 0,
-      ai_toxicity_score: ai_toxicity_score || 0,
-      reason
+      ai_toxicity_score: ai_toxicity_score || 0
     });
 
     return appeal;
   }
 
-  /**
-   * Lấy danh sách kháng cáo của user
-   */
   async getUserAppeals(user_id) {
     return appealRepository.findByUserId(user_id);
   }
 
-  /**
-   * Admin lấy tất cả kháng cáo PENDING
-   */
   async getPendingAppeals() {
     return appealRepository.getPending();
   }
 
-  /**
-   * Admin lấy tất cả kháng cáo
-   */
   async getAllAppeals() {
     return appealRepository.getAll();
   }
 
-  /**
-   * Admin duyệt kháng cáo (APPROVED) → khôi phục nội dung + thông báo user
-   */
   async approveAppeal(appeal_id, admin_id, admin_note = '') {
     const appeal = await appealRepository.findById(appeal_id);
     if (!appeal) throw new Error('Kháng cáo không tồn tại');
     if (appeal.status !== 'PENDING') throw new Error('Kháng cáo này đã được xử lý');
 
-    // Khôi phục nội dung bị ẩn
     if (appeal.target_model === 'Post') {
-      const Post = require('../models/Post');
-      await Post.findByIdAndUpdate(appeal.target_id._id || appeal.target_id, {
-        visibility: 'PUBLIC',
-        is_sensitive: false
-      });
-    } else if (appeal.target_model === 'Comment') {
-      const Comment = require('../models/Comment');
-      await Comment.findByIdAndUpdate(appeal.target_id._id || appeal.target_id, {
-        is_hidden: false
-      });
+      await postRepository.updateVisibility(appeal.target_id, 'PUBLIC');
+    } else {
+      await commentRepository.updateHidden(appeal.target_id, false);
     }
 
-    // Cập nhật trạng thái kháng cáo
     const updated = await appealRepository.update(appeal_id, {
       status: 'APPROVED',
       reviewed_by: admin_id,
       admin_note
     });
 
-    // Gửi thông báo cho user
-    const notificationService = require('./notification.service');
+    await moderationRepository.createLog({
+      moderator_id: admin_id,
+      target_id: appeal.target_id,
+      target_model: appeal.target_model,
+      action: 'UNHIDE',
+      reason: `Admin approved appeal: ${admin_note || 'No note provided'}`
+    });
+
     await notificationService.sendSystemNotification({
       recipient: appeal.user_id._id || appeal.user_id,
       type: 'APPEAL_RESOLVED',
@@ -94,9 +109,6 @@ class AppealService {
     return updated;
   }
 
-  /**
-   * Admin từ chối kháng cáo (REJECTED) + thông báo user
-   */
   async rejectAppeal(appeal_id, admin_id, admin_note = '') {
     const appeal = await appealRepository.findById(appeal_id);
     if (!appeal) throw new Error('Kháng cáo không tồn tại');
@@ -108,8 +120,14 @@ class AppealService {
       admin_note
     });
 
-    // Gửi thông báo cho user
-    const notificationService = require('./notification.service');
+    await moderationRepository.createLog({
+      moderator_id: admin_id,
+      target_id: appeal.target_id,
+      target_model: appeal.target_model,
+      action: 'WARN',
+      reason: `Admin rejected appeal: ${admin_note || 'No note provided'}`
+    });
+
     await notificationService.sendSystemNotification({
       recipient: appeal.user_id._id || appeal.user_id,
       type: 'APPEAL_RESOLVED',

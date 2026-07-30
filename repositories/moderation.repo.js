@@ -2,10 +2,8 @@ const mongoose = require('mongoose');
 const ModerationQueue = require('../models/ModerationQueue');
 const ModerationLog = require('../models/ModerationLog');
 const Report = require('../models/Report');
-
-// Ensure models are registered for population
-if (!mongoose.models.Post) require('../models/Post');
-if (!mongoose.models.Comment) require('../models/Comment');
+const Post = require('../models/Post');
+const Comment = require('../models/Comment');
 
 class ModerationRepository {
   async addToQueue(queueData) {
@@ -17,9 +15,18 @@ class ModerationRepository {
   }
 
   async getPendingQueue() {
-    return ModerationQueue.find({ status: 'PENDING' })
-      .populate('target_id')
-      .sort({ createdAt: -1 });
+    const items = await ModerationQueue.find({ status: 'PENDING' }).sort({ createdAt: -1 });
+    
+    // Manually populate polymorphic target_id based on target_model
+    for (const item of items) {
+      if (item.target_model === 'Post') {
+        item.target_id = await Post.findById(item.target_id).populate('author', 'username avatar');
+      } else if (item.target_model === 'Comment') {
+        item.target_id = await Comment.findById(item.target_id).populate('author', 'username avatar');
+      }
+    }
+    
+    return items;
   }
 
   async updateQueueItem(id, data) {
@@ -27,7 +34,16 @@ class ModerationRepository {
   }
 
   async findQueueItemById(id) {
-    return ModerationQueue.findById(id);
+    const item = await ModerationQueue.findById(id);
+    if (!item) return null;
+    
+    if (item.target_model === 'Post') {
+      item.target_id = await Post.findById(item.target_id).populate('author', 'username avatar');
+    } else if (item.target_model === 'Comment') {
+      item.target_id = await Comment.findById(item.target_id).populate('author', 'username avatar');
+    }
+    
+    return item;
   }
 
   async createReport(reportData) {

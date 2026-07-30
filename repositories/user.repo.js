@@ -6,7 +6,7 @@ class UserRepository {
   }
 
   async findByEmail(email) {
-    return User.findOne({ email, isDeleted: false });
+    return User.findOne({ email, isDeleted: false }).select('-password');
   }
 
   async findById(id) {
@@ -23,6 +23,20 @@ class UserRepository {
 
   async findAll(query = {}) {
     return User.find(query).select('-password');
+  }
+
+  async incrementViolations(userId, spamDelta = 0, toxicDelta = 0) {
+    return User.findByIdAndUpdate(
+      userId,
+      {
+        $inc: {
+          spamCount: spamDelta,
+          toxicCount: toxicDelta,
+          violationScore: spamDelta * 1 + toxicDelta * 3
+        }
+      },
+      { new: true }
+    ).select('-password');
   }
 }
 

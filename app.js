@@ -1,4 +1,7 @@
 require('dotenv').config();
+const { validateEnv } = require('./config/env');
+validateEnv();
+
 const express = require('express');
 const path = require('path');
 const mongoose = require('mongoose');
@@ -30,7 +33,7 @@ app.use(errorMiddleware);
 
 // Database connection & Server start
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/blog-platform';
+const MONGODB_URI = process.env.MONGO_URI;
 
 const http = require('http');
 const server = http.createServer(app);
