@@ -57,6 +57,17 @@ class PostRepository {
     return Post.countDocuments({ original_post: originalPostId });
   }
 
+  async countRepostsBatch(originalPostIds) {
+    const results = await Post.aggregate([
+      { $match: { original_post: { $in: originalPostIds } } },
+      { $group: { _id: '$original_post', count: { $sum: 1 } } }
+    ]);
+    return results.reduce((acc, r) => {
+      acc[r._id.toString()] = r.count;
+      return acc;
+    }, {});
+  }
+
   async findOne(query) {
     return Post.findOne(query);
   }

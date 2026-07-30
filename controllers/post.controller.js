@@ -99,21 +99,6 @@ class PostController {
     }
   }
 
-  // Lấy nội dung bài viết kể cả khi bị ẩn — chỉ dùng trong trường hợp kháng cáo
-  async getPostContent(req, res, next) {
-    try {
-      const Post = require('../models/Post');
-      const post = await Post.findById(req.params.id)
-        .select('title content_html visibility author label');
-      if (!post) {
-        return res.status(404).json({ success: false, message: 'Post not found', data: null });
-      }
-      res.status(200).json({ success: true, data: post });
-    } catch (error) {
-      next(error);
-    }
-  }
-
   async getPostBySlug(req, res, next) {
     try {
       const post = await postService.getPostBySlug(req.params.slug, req.user?.id);
@@ -133,12 +118,17 @@ class PostController {
       
       const isAuthenticated = !!req.user;
       let isLimited = false;
+      let maxPosts = 0;
 
       if (!isAuthenticated) {
-        // Strict limit for guests: only 5 posts, no pagination beyond that
-        limit = 5;
-        skip = 0;
+        // Guests: allow pagination within first 5 posts
+        limit = Math.min(Number(limit) || 5, 5);
+        skip = Math.min(Number(skip) || 0, 5); // Cap skip at 5
         isLimited = true;
+        maxPosts = 5;
+      } else {
+        limit = Number(limit) || 10;
+        skip = Number(skip) || 0;
       }
 
       if (tag) {
@@ -148,7 +138,9 @@ class PostController {
         }
       }
 
-      const posts = await postService.listPosts(query, Number(skip) || 0, Number(limit) || 10, req.user?.id);
+      const posts = await postService.listPosts(query, skip, limit, req.user?.id);
+      const total = await postService.countPosts(query);
+      const guestTotal = isLimited ? Math.min(total, maxPosts) : total;
       
       res.status(200).json({ 
         success: true, 
@@ -156,7 +148,9 @@ class PostController {
         data: posts,
         meta: {
           isLimited,
-          total: isAuthenticated ? await postService.countPosts(query) : posts.length
+          total: guestTotal,
+          skip,
+          limit
         }
       });
     } catch (error) {

@@ -25,6 +25,17 @@ class InteractionRepository {
     });
     return interactions.map(i => i.target_id.toString());
   }
+
+  async countInteractionsBatch(target_ids, type) {
+    const results = await Interaction.aggregate([
+      { $match: { target_id: { $in: target_ids }, type } },
+      { $group: { _id: '$target_id', count: { $sum: 1 } } }
+    ]);
+    return results.reduce((acc, r) => {
+      acc[r._id.toString()] = r.count;
+      return acc;
+    }, {});
+  }
 }
 
 module.exports = new InteractionRepository();

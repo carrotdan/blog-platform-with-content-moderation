@@ -1,5 +1,6 @@
 const errorMiddleware = (err, req, res, next) => {
-  let statusCode = res.statusCode === 200 ? 500 : res.statusCode;
+  // Default to 500 for unhandled errors, use error's statusCode if available
+  let statusCode = err.statusCode || err.status || 500;
   let message = err.message || 'Internal Server Error';
 
   // Mongoose bad ObjectId

@@ -3,6 +3,7 @@ const moderationRepository = require('../repositories/moderation.repo');
 const userRepository = require('../repositories/user.repo');
 const aiService = require('./ai.service');
 const notificationService = require('./notification.service');
+const { getStatusFromScore, getDeltasFromLabel, isViolationLabel } = require('../utils/violation');
 
 class CommentService {
   async createComment(user_id, data) {
@@ -91,18 +92,13 @@ class CommentService {
       });
 
       // Update user violation stats atomically (only for SPAM/TOXIC, not AI_UNAVAILABLE)
-      if (label === 'SPAM' || label === 'TOXIC') {
-        const spamDelta = label === 'SPAM' ? 1 : 0;
-        const toxicDelta = label === 'TOXIC' ? 1 : 0;
+      if (isViolationLabel(label)) {
+        const { spamDelta, toxicDelta } = getDeltasFromLabel(label);
         
         const updatedUser = await userRepository.incrementViolations(user_id, spamDelta, toxicDelta);
         
         if (updatedUser) {
-          let status = updatedUser.status;
-          if (status !== 'BANNED') {
-            if (updatedUser.violationScore >= 10) status = 'BANNED';
-            else if (updatedUser.violationScore >= 5) status = 'WARNING';
-          }
+          const status = getStatusFromScore(updatedUser.violationScore, updatedUser.status);
           
           if (status !== updatedUser.status) {
             await userRepository.update(user_id, { status });
