@@ -11,4 +11,7 @@ const moderationLogSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+moderationLogSchema.index({ target_model: 1, target_id: 1, createdAt: -1 });
+moderationLogSchema.index({ moderator_id: 1, createdAt: -1 });
+
 module.exports = mongoose.model('ModerationLog', moderationLogSchema);

@@ -3,7 +3,12 @@ const notificationRepository = require('../repositories/notification.repo');
 class NotificationService {
   async sendNotification(data) {
     const notification = await notificationRepository.create(data);
-    const populatedNotif = await notification.populate('sender', 'username avatar');
+    
+    // Only populate sender if it exists (not system notification)
+    let populatedNotif = notification;
+    if (notification.sender) {
+      populatedNotif = await notification.populate('sender', 'username avatar');
+    }
     
     let message = 'Bạn có thông báo mới';
     if (data.type === 'LIKE') message = `${populatedNotif.sender?.username} đã thích bài viết của bạn`;

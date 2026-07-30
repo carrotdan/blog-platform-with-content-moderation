@@ -24,6 +24,22 @@ class CommentRepository {
   async updateHidden(id, is_hidden) {
     return Comment.findByIdAndUpdate(id, { is_hidden }, { new: true });
   }
+
+  async findByIdAdmin(id) {
+    return Comment.findById(id).populate('author', 'username email avatar');
+  }
+
+  async findAllAdmin(query = {}, skip = 0, limit = 20) {
+    return Comment.find(query)
+      .populate('author', 'username email avatar')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+  }
+
+  async updateSensitive(id, is_sensitive) {
+    return Comment.findByIdAndUpdate(id, { is_sensitive }, { new: true });
+  }
 }
 
 module.exports = new CommentRepository();

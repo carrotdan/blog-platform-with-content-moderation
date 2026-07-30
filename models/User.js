@@ -13,9 +13,18 @@ const userSchema = new mongoose.Schema(
     avatar: { type: String, default: '' },
     bio: { type: String, default: '' },
     isDeleted: { type: Boolean, default: false },
-    deleted_at: { type: Date, default: null }
+    deleted_at: { type: Date, default: null },
+    // Refresh token rotation
+    refreshTokens: [{
+      tokenHash: { type: String, required: true },
+      createdAt: { type: Date, default: Date.now },
+      expiresAt: { type: Date, required: true }
+    }]
   },
   { timestamps: true }
 );
+
+userSchema.index({ status: 1 });
+userSchema.index({ isDeleted: 1, status: 1 });
 
 module.exports = mongoose.model('User', userSchema);

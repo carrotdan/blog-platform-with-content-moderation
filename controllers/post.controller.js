@@ -2,12 +2,16 @@ const postService = require('../services/post.service');
 const { uploadToCloudinary } = require('../services/cloudinary.service');
 const fs = require('fs');
 const path = require('path');
+const { sanitizeHtml } = require('../utils/sanitize');
 
 class PostController {
   async createPost(req, res, next) {
     try {
       const { content_html, content_json, title, tags, visibility } = req.body;
       const files = req.files || [];
+      
+      // Sanitize HTML content
+      const sanitizedHtml = sanitizeHtml(content_html || req.body.content || '');
       
       let uploadedMedia = [];
       if (files.length > 0) {
@@ -50,7 +54,7 @@ class PostController {
 
       const postData = {
         title: title || 'No Title', // Fallback
-        content_html: content_html || req.body.content || '',
+        content_html: sanitizedHtml,
         content_json: content_json ? JSON.parse(content_json) : { text: req.body.content || '' },
         tags: tags ? tags.split(',') : [],
         visibility: visibility || 'PUBLIC',
@@ -169,6 +173,10 @@ class PostController {
 
   async updatePost(req, res, next) {
     try {
+      // Sanitize HTML content if present
+      if (req.body.content_html) {
+        req.body.content_html = sanitizeHtml(req.body.content_html);
+      }
       const post = await postService.updatePost(req.params.id, req.body, req.user.id);
       res.status(200).json({ success: true, message: 'Post updated successfully', data: post });
     } catch (error) {

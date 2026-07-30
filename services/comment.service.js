@@ -5,6 +5,8 @@ const aiService = require('./ai.service');
 const notificationService = require('./notification.service');
 const { getStatusFromScore, getDeltasFromLabel, isViolationLabel } = require('../utils/violation');
 
+const MAX_COMMENT_DEPTH = 5;
+
 class CommentService {
   async createComment(user_id, data) {
     const { post_id, parent_id, content } = data;
@@ -21,6 +23,12 @@ class CommentService {
       const parentComment = await commentRepository.findById(parent_id);
       if (parentComment) {
         depth = parentComment.depth + 1;
+        
+        if (depth >= MAX_COMMENT_DEPTH) {
+          const error = new Error(`Maximum comment depth of ${MAX_COMMENT_DEPTH} exceeded`);
+          error.statusCode = 400;
+          throw error;
+        }
       }
     }
 

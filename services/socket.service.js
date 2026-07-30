@@ -3,6 +3,7 @@ const socketIo = require('socket.io');
 let io;
 
 module.exports = {
+  io: null,
   init: (server) => {
     io = socketIo(server, {
       cors: { origin: '*' }
@@ -20,6 +21,8 @@ module.exports = {
         console.log('Client disconnected:', socket.id);
       });
     });
+    
+    module.exports.io = io;
     return io;
   },
   

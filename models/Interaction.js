@@ -12,5 +12,9 @@ const interactionSchema = new mongoose.Schema(
 
 // Unique index to prevent duplicate interactions
 interactionSchema.index({ user_id: 1, target_id: 1, type: 1 }, { unique: true });
+// Indexes for common queries
+interactionSchema.index({ target_model: 1, target_id: 1, type: 1 });
+interactionSchema.index({ user_id: 1, type: 1, target_model: 1 });
+interactionSchema.index({ target_id: 1, type: 1 });
 
 module.exports = mongoose.model('Interaction', interactionSchema);

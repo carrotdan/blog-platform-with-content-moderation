@@ -75,6 +75,18 @@ class PostRepository {
   async updateVisibility(id, visibility) {
     return Post.findByIdAndUpdate(id, { visibility }, { new: true });
   }
+
+  async findAdminAll(skip = 0, limit = 20) {
+    return Post.find()
+      .populate('author', 'username email avatar')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+  }
+
+  async findByIdAdmin(id) {
+    return Post.findById(id).populate('author', 'username email avatar');
+  }
 }
 
 module.exports = new PostRepository();

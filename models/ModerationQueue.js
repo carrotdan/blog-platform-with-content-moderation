@@ -14,4 +14,9 @@ const moderationQueueSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+moderationQueueSchema.index({ status: 1, createdAt: -1 });
+moderationQueueSchema.index({ target_model: 1, target_id: 1 });
+moderationQueueSchema.index({ target_type: 1, status: 1 });
+moderationQueueSchema.index({ reporter_id: 1, createdAt: -1 });
+
 module.exports = mongoose.model('ModerationQueue', moderationQueueSchema);

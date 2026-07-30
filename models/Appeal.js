@@ -31,7 +31,9 @@ const appealSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-appealSchema.index({ user_id: 1 });
-appealSchema.index({ status: 1 });
+appealSchema.index({ user_id: 1, createdAt: -1 });
+appealSchema.index({ status: 1, createdAt: -1 });
+appealSchema.index({ target_model: 1, target_id: 1 });
+appealSchema.index({ reviewed_by: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Appeal', appealSchema);

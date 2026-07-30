@@ -1,8 +1,20 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 
 class AuthService {
+  // Hash token for storage
+  hashToken(token) {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  // Clean expired refresh tokens
+  cleanExpiredTokens(user) {
+    const now = new Date();
+    user.refreshTokens = user.refreshTokens.filter(rt => rt.expiresAt > now);
+  }
+
   async register(data) {
     const { email, password, role, avatar, bio, username } = data;
     
@@ -47,6 +59,14 @@ class AuthService {
       throw new Error('Account has been deleted');
     }
 
+    // Check if user is banned or muted
+    if (user.status === 'BANNED') {
+      throw new Error('Account has been banned');
+    }
+    if (user.status === 'MUTED') {
+      throw new Error('Account is muted');
+    }
+
     // Compare password using bcrypt
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
@@ -67,6 +87,13 @@ class AuthService {
       expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d'
     });
 
+    // Store refresh token hash
+    const tokenHash = this.hashToken(refreshToken);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    user.refreshTokens.push({ tokenHash, expiresAt });
+    await user.save();
+
     return {
       accessToken,
       refreshToken,
@@ -76,7 +103,8 @@ class AuthService {
         username: user.username,
         role: user.role,
         avatar: user.avatar,
-        bio: user.bio
+        bio: user.bio,
+        status: user.status
       }
     };
   }
@@ -88,11 +116,37 @@ class AuthService {
       const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
       
       // Verify user still exists and not deleted
-      const user = await User.findById(decoded.userId);
+      const user = await User.findById(decoded.userId).select('+refreshTokens');
       if (!user || user.isDeleted) {
         throw new Error('User not found or deleted');
       }
 
+      // Check user status
+      if (user.status === 'BANNED') {
+        throw new Error('Account has been banned');
+      }
+      if (user.status === 'MUTED') {
+        throw new Error('Account is muted');
+      }
+
+      // Clean expired tokens
+      this.cleanExpiredTokens(user);
+
+      // Find and remove the used refresh token
+      const tokenHash = this.hashToken(token);
+      const tokenIndex = user.refreshTokens.findIndex(rt => rt.tokenHash === tokenHash);
+      
+      if (tokenIndex === -1) {
+        // Token not found - possible reuse attack, revoke all tokens
+        user.refreshTokens = [];
+        await user.save();
+        throw new Error('Invalid or expired refresh token');
+      }
+
+      // Remove the used token (rotation)
+      user.refreshTokens.splice(tokenIndex, 1);
+
+      // Generate new tokens
       const payload = {
         userId: user._id.toString(),
         role: user.role
@@ -102,10 +156,46 @@ class AuthService {
         expiresIn: process.env.JWT_ACCESS_EXPIRE || '15m'
       });
 
-      return { accessToken };
+      const newRefreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
+        expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d'
+      });
+
+      // Store new refresh token hash
+      const newTokenHash = this.hashToken(newRefreshToken);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      user.refreshTokens.push({ tokenHash: newTokenHash, expiresAt });
+
+      await user.save();
+
+      return { accessToken, refreshToken: newRefreshToken };
     } catch (error) {
+      if (error.message === 'Invalid or expired refresh token' || 
+          error.message === 'User not found or deleted' ||
+          error.message === 'Account has been banned' ||
+          error.message === 'Account is muted') {
+        throw error;
+      }
       throw new Error('Invalid or expired refresh token');
     }
+  }
+
+  // Optional: logout - revoke specific refresh token
+  async logout(userId, refreshToken) {
+    const user = await User.findById(userId).select('+refreshTokens');
+    if (!user) return;
+
+    const tokenHash = this.hashToken(refreshToken);
+    user.refreshTokens = user.refreshTokens.filter(rt => rt.tokenHash !== tokenHash);
+    await user.save();
+  }
+
+  // Optional: logout from all devices - revoke all refresh tokens
+  async logoutAll(userId) {
+    const user = await User.findById(userId).select('+refreshTokens');
+    if (!user) return;
+
+    user.refreshTokens = [];
+    await user.save();
   }
 }
 

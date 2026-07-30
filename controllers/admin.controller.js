@@ -1,5 +1,7 @@
 const userRepository = require('../repositories/user.repo');
-const User = require('../models/User');
+const postRepository = require('../repositories/post.repo');
+const commentRepository = require('../repositories/comment.repo');
+const moderationRepository = require('../repositories/moderation.repo');
 
 class AdminController {
   async getViolations(req, res, next) {
@@ -28,7 +30,7 @@ class AdminController {
 
   async getUsers(req, res, next) {
     try {
-      const users = await User.find().select('-password').sort({ createdAt: -1 });
+      const users = await userRepository.findAll();
       res.status(200).json({ success: true, message: 'Users retrieved', data: users });
     } catch (error) {
       next(error);
@@ -47,10 +49,7 @@ class AdminController {
 
   async getPosts(req, res, next) {
     try {
-      const Post = require('../models/Post');
-      const posts = await Post.find()
-        .populate('author', 'username email avatar')
-        .sort({ createdAt: -1 });
+      const posts = await postRepository.findAdminAll(0, 50);
       res.status(200).json({ success: true, message: 'All posts retrieved', data: posts });
     } catch (error) {
       next(error);
@@ -59,8 +58,7 @@ class AdminController {
 
   async hidePost(req, res, next) {
     try {
-      const Post = require('../models/Post');
-      const post = await Post.findByIdAndUpdate(req.params.id, { visibility: 'HIDDEN' }, { new: true });
+      const post = await postRepository.updateVisibility(req.params.id, 'HIDDEN');
       res.status(200).json({ success: true, message: 'Post hidden', data: post });
     } catch (error) {
       next(error);
@@ -69,8 +67,7 @@ class AdminController {
 
   async unhidePost(req, res, next) {
     try {
-      const Post = require('../models/Post');
-      const post = await Post.findByIdAndUpdate(req.params.id, { visibility: 'PUBLIC' }, { new: true });
+      const post = await postRepository.updateVisibility(req.params.id, 'PUBLIC');
       res.status(200).json({ success: true, message: 'Post restored', data: post });
     } catch (error) {
       next(error);
@@ -79,8 +76,7 @@ class AdminController {
 
   async markSensitive(req, res, next) {
     try {
-      const Post = require('../models/Post');
-      const post = await Post.findByIdAndUpdate(req.params.id, { is_sensitive: true }, { new: true });
+      const post = await postRepository.update(req.params.id, { is_sensitive: true });
       res.status(200).json({ success: true, message: 'Post marked as sensitive', data: post });
     } catch (error) {
       next(error);
@@ -89,8 +85,7 @@ class AdminController {
 
   async unmarkSensitive(req, res, next) {
     try {
-      const Post = require('../models/Post');
-      const post = await Post.findByIdAndUpdate(req.params.id, { is_sensitive: false }, { new: true });
+      const post = await postRepository.update(req.params.id, { is_sensitive: false });
       res.status(200).json({ success: true, message: 'Sensitive mark removed', data: post });
     } catch (error) {
       next(error);
@@ -99,27 +94,8 @@ class AdminController {
 
   async getReports(req, res, next) {
     try {
-      const Report = require('../models/Report');
-      const Post = require('../models/Post');
-      const Comment = require('../models/Comment');
-      
-      const reports = await Report.find({ status: 'PENDING' })
-        .populate('reporter_id', 'username email')
-        .sort({ createdAt: -1 });
-      
-      const enrichedReports = await Promise.all(reports.map(async (report) => {
-        const reportObj = report.toObject();
-        if (report.target_model === 'Post') {
-          const post = await Post.findById(report.target_id).select('content_html slug');
-          reportObj.target_data = post;
-        } else if (report.target_model === 'Comment') {
-          const comment = await Comment.findById(report.target_id).select('content');
-          reportObj.target_data = comment;
-        }
-        return reportObj;
-      }));
-
-      res.status(200).json({ success: true, message: 'Reports retrieved', data: enrichedReports });
+      const reports = await moderationRepository.findReports({ status: 'PENDING' }, 0, 50);
+      res.status(200).json({ success: true, message: 'Reports retrieved', data: reports });
     } catch (error) {
       next(error);
     }
@@ -127,25 +103,23 @@ class AdminController {
 
   async resolveReport(req, res, next) {
     try {
-      const { action } = req.body; // 'HIDE' or 'DISMISS'
-      const Report = require('../models/Report');
-      const Post = require('../models/Post');
-      const Comment = require('../models/Comment');
+      const { action } = req.body; // 'HIDE' or 'DISMISS' or 'MARK_SENSITIVE'
       
-      const report = await Report.findById(req.params.id);
+      const report = await moderationRepository.findReportById(req.params.id);
       if (!report) return res.status(404).json({ success: false, message: 'Report not found' });
 
       if (action === 'HIDE') {
         if (report.target_model === 'Post') {
-          await Post.findByIdAndUpdate(report.target_id, { visibility: 'HIDDEN' });
+          await postRepository.updateVisibility(report.target_id, 'HIDDEN');
         } else if (report.target_model === 'Comment') {
-          await Comment.findByIdAndDelete(report.target_id);
+          // M7: Hide comment instead of delete
+          await commentRepository.updateHidden(report.target_id, true);
         }
       } else if (action === 'MARK_SENSITIVE') {
         if (report.target_model === 'Post') {
-          await Post.findByIdAndUpdate(report.target_id, { is_sensitive: true });
+          await postRepository.update(report.target_id, { is_sensitive: true });
         } else if (report.target_model === 'Comment') {
-          await Comment.findByIdAndUpdate(report.target_id, { is_sensitive: true });
+          await commentRepository.updateSensitive(report.target_id, true);
         }
       }
 
@@ -196,8 +170,7 @@ class AdminController {
 
   async deletePost(req, res, next) {
     try {
-      const Post = require('../models/Post');
-      const post = await Post.findByIdAndDelete(req.params.id);
+      const post = await postRepository.delete(req.params.id);
       if (!post) {
         return res.status(404).json({ success: false, message: 'Post not found' });
       }

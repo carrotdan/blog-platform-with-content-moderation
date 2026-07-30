@@ -20,5 +20,7 @@ const commentSchema = new mongoose.Schema(
 
 // Indexing for faster lookups by post
 commentSchema.index({ post_id: 1 });
+commentSchema.index({ post_id: 1, is_hidden: 1, createdAt: 1 });
+commentSchema.index({ author: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Comment', commentSchema);

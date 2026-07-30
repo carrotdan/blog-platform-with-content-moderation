@@ -28,8 +28,13 @@ const postSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index tags for fast filtering (slug unique index is defined inline above)
+// Indexes for common query patterns
 postSchema.index({ tags: 1 });
+postSchema.index({ author: 1, visibility: 1, createdAt: -1 });
+postSchema.index({ visibility: 1, createdAt: -1 });
+postSchema.index({ original_post: 1 });
+postSchema.index({ author: 1, createdAt: -1 });
+postSchema.index({ status: 1, visibility: 1 });
 
 module.exports = mongoose.model('Post', postSchema);
 
