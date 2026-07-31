@@ -6,21 +6,31 @@ const User = require('../models/User');
 class UserService {
   // Delegate auth operations to authService but transform response format for user controller
   async register(data) {
+    // M51: register is atomic now — authService.register creates the account and
+    // issues access/refresh tokens in one flow. The previous register-then-login
+    // left an account with no tokens if the login step failed.
     const result = await authService.register(data);
-    // After registration, log in to get tokens
-    const loginResult = await authService.login(data.email, data.password);
     return {
-      user: loginResult.user,
+      user: result.user,
       tokens: {
-        accessToken: loginResult.accessToken,
-        refreshToken: loginResult.refreshToken
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken
       }
     };
   }
 
   async updateProfile(user_id, data) {
     const updateData = {};
-    if (data.avatar !== undefined) updateData.avatar = data.avatar;
+    if (data.avatar !== undefined) {
+      // M43: defense-in-depth — never persist a javascript:/data: avatar even if
+      // a caller bypasses route validation.
+      if (!/^https?:\/\//i.test(data.avatar)) {
+        const err = new Error('Avatar must be an http(s) URL');
+        err.statusCode = 400;
+        throw err;
+      }
+      updateData.avatar = data.avatar;
+    }
     if (data.bio !== undefined) updateData.bio = data.bio;
     if (data.username !== undefined) {
       // M36: defense-in-depth — reject usernames outside the allowed charset

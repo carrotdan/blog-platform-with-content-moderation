@@ -61,7 +61,8 @@ class ReportService {
     const Report = require('../models/Report');
     const Post = require('../models/Post');
     const Comment = require('../models/Comment');
-    const { updateHidden } = require('../repositories/comment.repo');
+    const commentRepository = require('../repositories/comment.repo');
+    const moderationRepository = require('../repositories/moderation.repo');
 
     const VALID_ACTIONS = ['HIDE', 'DISMISS', 'MARK_SENSITIVE'];
     if (!VALID_ACTIONS.includes(action)) {
@@ -75,7 +76,8 @@ class ReportService {
       if (report.target_model === 'Post') {
         await Post.findByIdAndUpdate(report.target_id, { visibility: 'HIDDEN' });
       } else if (report.target_model === 'Comment') {
-        await updateHidden(report.target_id, true);
+        // M44: hiding a comment must hide its whole reply subtree too.
+        await commentRepository.hideSubtree(report.target_id);
       }
       report.status = 'RESOLVED';
     } else if (action === 'MARK_SENSITIVE') {
@@ -87,6 +89,18 @@ class ReportService {
       report.status = 'RESOLVED';
     } else {
       report.status = 'DISMISSED';
+    }
+
+    // M47: mirror the moderation-queue actions — report resolutions are
+    // moderation decisions and belong in the ModerationLog trail.
+    if (action !== 'DISMISS') {
+      await moderationRepository.createLog({
+        moderator_id: options.moderator_id || null,
+        target_id: report.target_id,
+        target_model: report.target_model,
+        action: action === 'HIDE' ? 'HIDE' : 'WARN',
+        reason: `Report resolved with action ${action}`
+      });
     }
 
     await report.save();

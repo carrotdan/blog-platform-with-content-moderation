@@ -59,6 +59,9 @@ class ModerationRepository {
     const commentMap = new Map(comments.map(c => [c._id.toString(), c]));
 
     return items.map(item => {
+      // M44/M47: keep the original ObjectId so callers can still target updates
+      // and ModerationLog rows after target_id is swapped for the populated doc.
+      item.rawTargetId = item.target_id;
       if (item.target_model === 'Post') {
         item.target_id = postMap.get(item.target_id.toString()) || null;
       } else if (item.target_model === 'Comment') {

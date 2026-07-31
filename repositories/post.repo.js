@@ -3,7 +3,12 @@ const { getAuthorPopulate, getOriginalPostPopulate } = require('../utils/populat
 
 class PostRepository {
   async create(postData) {
-    return Post.create(postData);
+    // M46: createPost/repostPost returned an unpopulated author (raw ObjectId);
+    // populate the same author shape as every other read path so responses are
+    // consistent.
+    const doc = await Post.create(postData);
+    await doc.populate(getAuthorPopulate());
+    return doc;
   }
 
   async findById(id) {

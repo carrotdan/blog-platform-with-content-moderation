@@ -25,7 +25,8 @@ class ModerationController {
 
   async approveItem(req, res, next) {
     try {
-      await moderationService.approve(req.params.id);
+      // M47: record which moderator approved the item in ModerationLog.
+      await moderationService.approve(req.params.id, req.user.id);
       res.status(200).json({ success: true, message: 'Item approved' });
     } catch (error) {
       next(error);
@@ -34,7 +35,8 @@ class ModerationController {
 
   async hideItem(req, res, next) {
     try {
-      await moderationService.hide(req.params.id);
+      // M47: record which moderator hid the item in ModerationLog.
+      await moderationService.hide(req.params.id, req.user.id);
       res.status(200).json({ success: true, message: 'Item hidden' });
     } catch (error) {
       next(error);
@@ -42,7 +44,8 @@ class ModerationController {
   }
   async warnItem(req, res, next) {
     try {
-      await moderationService.warn(req.params.id);
+      // M47: record which moderator warned the item in ModerationLog.
+      await moderationService.warn(req.params.id, req.user.id);
       res.status(200).json({ success: true, message: 'Item marked as sensitive (warned)' });
     } catch (error) {
       next(error);

@@ -1,5 +1,11 @@
 const { z } = require('zod');
 
+// M43: z.string().url() happily accepts javascript: and data: URLs, which would
+// allow stored-XSS when an avatar src is rendered in <img src="...">. Restrict
+// avatars to http(s) only at the schema level.
+const safeUrl = z.string().url('Avatar must be a valid URL')
+  .refine(u => /^https?:\/\//i.test(u), 'Avatar must be an http(s) URL');
+
 const registerSchema = z.object({
   body: z.object({
     email: z.string().email('Invalid email format'),
@@ -9,7 +15,7 @@ const registerSchema = z.object({
     username: z.string().min(3, 'Username must be at least 3 characters').max(30)
       .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
       .optional(),
-    avatar: z.string().url('Avatar must be a valid URL').optional(),
+    avatar: safeUrl.optional(),
     bio: z.string().max(500, 'Bio must be at most 500 characters').optional()
   })
 });
@@ -19,7 +25,7 @@ const updateProfileSchema = z.object({
     username: z.string().min(3, 'Username must be at least 3 characters').max(30)
       .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
       .optional(),
-    avatar: z.string().url('Avatar must be a valid URL').optional(),
+    avatar: safeUrl.optional(),
     bio: z.string().max(500, 'Bio must be at most 500 characters').optional()
   })
 });

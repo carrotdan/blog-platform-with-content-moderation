@@ -8,6 +8,30 @@ const notificationService = require('./notification.service');
 const { getStatusFromScore, getViolationDeltas, isViolationLabel } = require('../utils/violation');
 const { randomUUID } = require('crypto');
 
+// M48: extract human-readable text from a content_json payload. The payload is
+// arbitrary editor JSON (notum-style {text} or blocks arrays), so walk the
+// common shapes and never hand the raw JSON string to the AI analyzer.
+function extractTextFromContentJson(contentJson) {
+  if (!contentJson) return '';
+  let parsed = contentJson;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return '';
+    }
+  }
+  if (typeof parsed !== 'object') return '';
+  if (typeof parsed.text === 'string') return parsed.text;
+  if (Array.isArray(parsed.blocks)) {
+    return parsed.blocks
+      .map(b => (b && b.data && typeof b.data.text === 'string' ? b.data.text : ''))
+      .filter(Boolean)
+      .join(' ');
+  }
+  return '';
+}
+
 class PostService {
   async createPost(user_id, data) {
     // Calculate reading time (avg 200 words per minute)
@@ -297,77 +321,86 @@ async updatePost(id, data, user_id) {
     // H32: Re-run AI moderation whenever the title or body changes (a title-only
     // edit previously skipped analysis, letting users retitle posts with
     // toxic/spam text that stayed PUBLIC with stale scores).
-    const contentChanged = !!(data.content_html || data.content_json || data.title);
+    // M48: content_json-only edits must be analyzed from the text extracted out
+    // of the JSON (never the raw JSON string), and skipped when the new payload
+    // carries no analyzable text (a pure formatting/metadata change).
+    const hasHtml = !!data.content_html;
+    const hasTitle = !!data.title;
+    const jsonText = extractTextFromContentJson(data.content_json);
+    const contentChanged = hasHtml || hasTitle || !!jsonText;
     if (contentChanged) {
       const aiService = require('./ai.service');
-      const bodyText = data.content_html ? data.content_html.replace(/<[^>]+>/g, ' ') : '';
+      const bodyText = hasHtml ? data.content_html.replace(/<[^>]+>/g, ' ') : jsonText;
       const analyzeText = [data.title || post.title || '', bodyText].filter(Boolean).join(' ').trim();
-      const aiResult = await aiService.analyze(analyzeText);
-      const { spam_score, toxicity_score, label } = aiResult;
-      const isFlagged = label === 'SPAM' || label === 'TOXIC' || label === 'AI_UNAVAILABLE';
 
-      updateData.spam_score = spam_score;
-      updateData.toxicity_score = toxicity_score;
-      updateData.label = label;
+      if (analyzeText) {
+        const aiResult = await aiService.analyze(analyzeText);
+        const { spam_score, toxicity_score, label } = aiResult;
+        const isFlagged = label === 'SPAM' || label === 'TOXIC' || label === 'AI_UNAVAILABLE';
 
-      // H33: Do NOT auto-unhide content that is currently HIDDEN — that state is
-      // cleared only by an explicit moderation action (queue review / appeal
-      // approval). Editing a hidden post to clean content keeps it HIDDEN.
-      if (isFlagged) {
-        updateData.visibility = 'HIDDEN';
-      } else if (post.visibility === 'HIDDEN') {
-        updateData.visibility = 'HIDDEN';
-      } else {
-        updateData.visibility = data.visibility || post.visibility || 'PUBLIC';
-      }
+        updateData.spam_score = spam_score;
+        updateData.toxicity_score = toxicity_score;
+        updateData.label = label;
 
-      if (isFlagged) {
-        const moderationRepository = require('../repositories/moderation.repo');
-        await moderationRepository.addToQueue({
-          target_type: label,
-          target_id: post._id,
-          target_model: 'Post',
-          reason: label === 'AI_UNAVAILABLE' 
-            ? 'AI moderation service unavailable - queued for manual review' 
-            : `AI detected ${label} on update (spam: ${spam_score}, toxicity: ${toxicity_score})`,
-          spam_score,
-          toxicity_score,
-          status: 'PENDING',
-          reporter_id: null
-        });
+        // H33: Do NOT auto-unhide content that is currently HIDDEN — that state is
+        // cleared only by an explicit moderation action (queue review / appeal
+        // approval). Editing a hidden post to clean content keeps it HIDDEN.
+        if (isFlagged) {
+          updateData.visibility = 'HIDDEN';
+        } else if (post.visibility === 'HIDDEN') {
+          updateData.visibility = 'HIDDEN';
+        } else {
+          updateData.visibility = data.visibility || post.visibility || 'PUBLIC';
+        }
 
-        if (isViolationLabel(label) && label !== post.label) {
-          const userRepository = require('../repositories/user.repo');
-          const notificationService = require('./notification.service');
-          
-          const { spamDelta, toxicDelta } = getViolationDeltas(label);
-          const updatedUser = await userRepository.incrementViolations(user_id, spamDelta, toxicDelta);
-          
-          if (updatedUser) {
-            const status = getStatusFromScore(updatedUser.violationScore, updatedUser.status);
-            if (status !== updatedUser.status) {
-              await userRepository.update(user_id, { status });
-            }
-          }
-
-          const contentPreview = [
-            data.title && data.title !== 'No Title' ? data.title : '',
-            bodyText.slice(0, 200)
-          ].filter(Boolean).join('\n').trim();
-
-          await notificationService.sendSystemNotification({
-            recipient: user_id,
-            type: 'AI_MODERATION',
-            entity_id: post._id,
-            entity_model: 'Post',
-            metadata: {
-              ai_label: label,
-              target_model: 'Post',
-              spam_score,
-              toxicity_score,
-              content_preview: contentPreview.slice(0, 300)
-            }
+        if (isFlagged) {
+          const moderationRepository = require('../repositories/moderation.repo');
+          await moderationRepository.addToQueue({
+            target_type: label,
+            target_id: post._id,
+            target_model: 'Post',
+            reason: label === 'AI_UNAVAILABLE' 
+              ? 'AI moderation service unavailable - queued for manual review' 
+              : `AI detected ${label} on update (spam: ${spam_score}, toxicity: ${toxicity_score})`,
+            spam_score,
+            toxicity_score,
+            status: 'PENDING',
+            reporter_id: null
           });
+
+          if (isViolationLabel(label) && label !== post.label) {
+            const userRepository = require('../repositories/user.repo');
+            const notificationService = require('./notification.service');
+            
+            const { spamDelta, toxicDelta } = getViolationDeltas(label);
+            const updatedUser = await userRepository.incrementViolations(user_id, spamDelta, toxicDelta);
+            
+            if (updatedUser) {
+              const status = getStatusFromScore(updatedUser.violationScore, updatedUser.status);
+              if (status !== updatedUser.status) {
+                await userRepository.update(user_id, { status });
+              }
+            }
+
+            const contentPreview = [
+              data.title && data.title !== 'No Title' ? data.title : '',
+              bodyText.slice(0, 200)
+            ].filter(Boolean).join('\n').trim();
+
+            await notificationService.sendSystemNotification({
+              recipient: user_id,
+              type: 'AI_MODERATION',
+              entity_id: post._id,
+              entity_model: 'Post',
+              metadata: {
+                ai_label: label,
+                target_model: 'Post',
+                spam_score,
+                toxicity_score,
+                content_preview: contentPreview.slice(0, 300)
+              }
+            });
+          }
         }
       }
     }
@@ -473,38 +506,46 @@ async updatePost(id, data, user_id) {
     // Aggregate $match stages are not auto-cast by Mongoose, so convert the
     // string userId (from req.user.id) to an ObjectId before matching.
     const userObjId = typeof user_id === 'string' ? new mongoose.Types.ObjectId(user_id) : user_id;
-    
-    // L31: total must only count bookmarks whose target post still exists and
-    // is not HIDDEN — deleted/moderated targets were previously counted even
-    // though they can never be returned, making pagination meta inaccurate.
-    const [totalAgg] = await Interaction.aggregate([
-      { $match: { user_id: userObjId, type: 'BOOKMARK', target_model: 'Post' } },
-      { $lookup: { from: 'posts', localField: 'target_id', foreignField: '_id', as: 'post' } },
-      { $unwind: '$post' },
-      { $match: { 'post.visibility': { $ne: 'HIDDEN' }, 'post.status': 'PUBLISHED' } },
-      { $count: 'total' }
-    ]);
-    const total = totalAgg ? totalAgg.total : 0;
 
-    const interactions = await Interaction.find({ user_id, type: 'BOOKMARK', target_model: 'Post' })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    const postIds = interactions.map(i => i.target_id);
-    
-    const posts = await Post.find({
-      _id: { $in: postIds },
-      visibility: { $ne: 'HIDDEN' },
-      status: 'PUBLISHED'
-    }).populate('author', 'username avatar');
-    
-    // Maintain the order of bookmarks
+    // M45: pagination must apply AFTER the deleted/hidden-target filter.
+    // Previously the interaction rows were skip/limit'd first and the post
+    // lookup filtered afterwards, so a page could silently contain fewer (or
+    // zero) posts while still advancing the cursor. Both total and page are
+    // now computed against the same filtered set via a $lookup+$match pipeline.
+    const matchFilter = { 'post.visibility': { $ne: 'HIDDEN' }, 'post.status': 'PUBLISHED' };
+
+    const [totalAgg, page] = await Promise.all([
+      Interaction.aggregate([
+        { $match: { user_id: userObjId, type: 'BOOKMARK', target_model: 'Post' } },
+        { $lookup: { from: 'posts', localField: 'target_id', foreignField: '_id', as: 'post' } },
+        { $unwind: '$post' },
+        { $match: matchFilter },
+        { $count: 'total' }
+      ]),
+      Interaction.aggregate([
+        { $match: { user_id: userObjId, type: 'BOOKMARK', target_model: 'Post' } },
+        { $lookup: { from: 'posts', localField: 'target_id', foreignField: '_id', as: 'post' } },
+        { $unwind: '$post' },
+        { $match: matchFilter },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ])
+    ]);
+    const total = totalAgg.length ? totalAgg[0].total : 0;
+
+    // Re-fetch as Mongoose documents (needed for .toObject() in _enrichPosts)
+    // and keep the aggregate (bookmark-createdAt) order.
+    const postIds = page.map(r => r.post._id);
+    const posts = postIds.length
+      ? await Post.find({ _id: { $in: postIds } }).populate('author', 'username avatar')
+      : [];
     const postMap = posts.reduce((acc, post) => {
       acc[post._id.toString()] = post;
       return acc;
     }, {});
-    
     const orderedPosts = postIds.map(id => postMap[id.toString()]).filter(Boolean);
+
     const enriched = await this._enrichPosts(orderedPosts, user_id);
     return { posts: enriched, total };
   }

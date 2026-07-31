@@ -1616,3 +1616,260 @@ describe('Sprint 17 fixes (H42-H49)', () => {
   });
 });
 
+describe('Sprint 18 fixes (M43-M51)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  test('M43: avatar rejects javascript:/data: URLs at the schema and API levels', async () => {
+    const { registerSchema, updateProfileSchema } = require('../../validators/schemas');
+
+    // z.url() alone passes these; the new http(s)-only refine must reject them.
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'ftp://host/x.png']) {
+      expect(registerSchema.safeParse({ body: { email: 'a@b.com', password: 'password123', username: 'm43u', avatar: bad } }).success).toBe(false);
+      expect(updateProfileSchema.safeParse({ body: { avatar: bad } }).success).toBe(false);
+    }
+    // http(s) URLs still pass
+    expect(registerSchema.safeParse({ body: { email: 'a@b.com', password: 'password123', username: 'm43u', avatar: 'https://cdn.example.com/a.png' } }).success).toBe(true);
+
+    // API: register with a javascript: avatar → 400 (service-level, since the
+    // /auth/* HTTP limiter is exhausted by the "Rate limiting" test above)
+    const authService = require('../../services/auth.service');
+    await expect(authService.register({
+      email: 'm43@example.com',
+      password: 'password123',
+      username: 'm43user',
+      avatar: 'javascript:alert(1)'
+    })).rejects.toThrow('Avatar must be an http(s) URL');
+
+    // API: updateProfile with a data: avatar → 400 (service-level guard)
+    const owner = await createUser('m43profile@example.com', 'm43profile');
+    const token = mintToken(owner._id.toString());
+    const up = await request(app)
+      .put('/api/v1/users/profile')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ avatar: 'data:text/html,<svg onload=alert(1)>' });
+    expect(up.status).toBe(400);
+  });
+
+  test('M44 + M47: hiding a comment hides its reply subtree and writes a HIDE log', async () => {
+    const admin = await createUser('m44admin@example.com', 'm44admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'MODERATOR' });
+    const adminToken = mintToken(admin._id.toString(), 'MODERATOR');
+
+    const author = await createUser('m44author@example.com', 'm44author');
+    const Post = mongoose.model('Post');
+    const Comment = mongoose.model('Comment');
+
+    const post = await Post.create({
+      author: author._id,
+      slug: `m44-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>x</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+    const c1 = await Comment.create({ post_id: post._id, author: author._id, content: 'parent', is_hidden: false });
+    const c2 = await Comment.create({ post_id: post._id, author: author._id, parent_id: c1._id, content: 'reply', is_hidden: false });
+    const c3 = await Comment.create({ post_id: post._id, author: author._id, parent_id: c2._id, content: 'reply reply', is_hidden: false });
+
+    // M44: enqueue the parent comment then hide it via the moderation queue.
+    const moderationRepository = require('../../repositories/moderation.repo');
+    const queueItem = await moderationRepository.addToQueue({
+      target_type: 'TOXIC',
+      target_id: c1._id,
+      target_model: 'Comment',
+      reason: 'toxic',
+      spam_score: 0.1,
+      toxicity_score: 0.9,
+      status: 'PENDING',
+      reporter_id: null
+    });
+
+    const res = await request(app)
+      .put(`/api/v1/moderation/hide/${queueItem._id.toString()}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+
+    // The whole subtree is hidden
+    for (const c of await Comment.find({ post_id: post._id })) {
+      expect(c.is_hidden).toBe(true);
+    }
+
+    // M47: the hide decision is in ModerationLog with the acting moderator
+    const ModerationLog = mongoose.model('ModerationLog');
+    const log = await ModerationLog.findOne({ target_id: c1._id, action: 'HIDE' });
+    expect(log).toBeTruthy();
+    expect(log.moderator_id.toString()).toBe(admin._id.toString());
+  });
+
+  test('M45: getBookmarkedPosts filters hidden targets BEFORE paginating', async () => {
+    const owner = await createUser('m45@example.com', 'm45user');
+    const token = mintToken(owner._id.toString());
+    const Post = mongoose.model('Post');
+    const Interaction = mongoose.model('Interaction');
+
+    const p1 = await Post.create({ author: owner._id, slug: `m45a-${Date.now()}`, content_json: {}, content_html: '<p>a</p>', visibility: 'PUBLIC', status: 'PUBLISHED' });
+    const p2 = await Post.create({ author: owner._id, slug: `m45b-${Date.now()}`, content_json: {}, content_html: '<p>b</p>', visibility: 'PUBLIC', status: 'PUBLISHED' });
+    const hidden = await Post.create({ author: owner._id, slug: `m45c-${Date.now()}`, content_json: {}, content_html: '<p>c</p>', visibility: 'HIDDEN', status: 'PUBLISHED' });
+
+    for (const p of [p1, p2, hidden]) {
+      await Interaction.create({ user_id: owner._id, target_id: p._id, target_model: 'Post', type: 'BOOKMARK' });
+    }
+
+    const res = await request(app)
+      .get('/api/v1/posts/me/bookmarks?limit=2')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    // total excludes the hidden target, and the page still returns 2 PUBLIC posts
+    expect(res.body.meta.total).toBe(2);
+    expect(res.body.data.length).toBe(2);
+  });
+
+  test('M46: createPost and createComment return a populated author', async () => {
+    const owner = await createUser('m46@example.com', 'm46user');
+    const token = mintToken(owner._id.toString());
+
+    const postRes = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: '<p>m46</p>' });
+    expect(postRes.status).toBe(201);
+    const author = postRes.body.data.author;
+    expect(author).toBeTruthy();
+    expect(typeof author).toBe('object');
+    expect(author.username).toBe('m46user');
+
+    const commentRes = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ post_id: postRes.body.data._id, content: 'a comment' });
+    expect(commentRes.status).toBe(201);
+    expect(commentRes.body.data.author.username).toBe('m46user');
+  });
+
+  test('M47: approving a flagged post clears the stale label and writes an UNHIDE log', async () => {
+    const admin = await createUser('m47admin@example.com', 'm47admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'MODERATOR' });
+    const adminToken = mintToken(admin._id.toString(), 'MODERATOR');
+
+    const author = await createUser('m47author@example.com', 'm47author');
+
+    // Create the flagged post at the service level (avoids the content-create
+    // HTTP rate limiter, which is nearly exhausted by earlier suites).
+    const aiService = require('../../services/ai.service');
+    const postService = require('../../services/post.service');
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    const created = await postService.createPost(author._id, { content_html: '<p>m47 spam</p>', content_json: {} });
+    expect(created.visibility).toBe('HIDDEN');
+    expect(created.label).toBe('SPAM');
+
+    const ModerationQueue = mongoose.model('ModerationQueue');
+    const queueItem = await ModerationQueue.findOne({ target_id: created._id, status: 'PENDING' });
+    expect(queueItem).toBeTruthy();
+
+    const res = await request(app)
+      .put(`/api/v1/moderation/approve/${queueItem._id.toString()}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+
+    const Post = mongoose.model('Post');
+    const fresh = await Post.findById(created._id);
+    expect(fresh.visibility).toBe('PUBLIC');
+    expect(fresh.label).toBe('NORMAL');
+
+    const ModerationLog = mongoose.model('ModerationLog');
+    const log = await ModerationLog.findOne({ target_id: created._id, action: 'UNHIDE' });
+    expect(log).toBeTruthy();
+    expect(log.moderator_id.toString()).toBe(admin._id.toString());
+  });
+
+  test('M48: a content_json-only edit analyzes extracted text, never the raw JSON', async () => {
+    const aiService = require('../../services/ai.service');
+    const postService = require('../../services/post.service');
+    const owner = await createUser('m48@example.com', 'm48user');
+
+    const created = await postService.createPost(owner._id, { content_html: '<p>initial body</p>', content_json: {} });
+    expect(created).toBeTruthy();
+
+    const analyzeTexts = [];
+    aiService.analyze.mockImplementation(async (text) => {
+      analyzeTexts.push(text);
+      return { spam_score: 0.05, toxicity_score: 0.05, label: 'NORMAL' };
+    });
+
+    // Edit with a text-bearing content_json → AI gets the extracted text only
+    await postService.updatePost(created._id, { content_json: { text: 'the actual new body text' } }, owner._id);
+    const last = analyzeTexts[analyzeTexts.length - 1];
+    expect(last).toContain('the actual new body text');
+    expect(last).not.toContain('{');
+
+    // Edit with a content_json carrying no analyzable text → AI must NOT run
+    const before = analyzeTexts.length;
+    await postService.updatePost(created._id, { content_json: { styles: { color: 'red' } } }, owner._id);
+    expect(analyzeTexts.length).toBe(before);
+  });
+
+  test('M49: admin user/post actions return 404 on a missing target', async () => {
+    const admin = await createUser('m49admin@example.com', 'm49admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'ADMIN' });
+    const adminToken = mintToken(admin._id.toString(), 'ADMIN');
+
+    const cases = [
+      ['/api/v1/admin/users/000000000000000000000000/role', { role: 'ADMIN' }],
+      ['/api/v1/admin/users/000000000000000000000000/mute', {}],
+      ['/api/v1/admin/users/000000000000000000000000/ban', {}],
+      ['/api/v1/admin/users/000000000000000000000000/reset-score', {}],
+      ['/api/v1/admin/posts/000000000000000000000000/hide', {}],
+      ['/api/v1/admin/posts/000000000000000000000000/unhide', {}],
+      ['/api/v1/admin/posts/000000000000000000000000/mark-sensitive', {}]
+    ];
+    for (const [path, body] of cases) {
+      const res = await request(app)
+        .put(path)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(body);
+      expect(res.status).toBe(404);
+    }
+  });
+
+  test('M50: an oversize image is a 413, not a 400', async () => {
+    const { validateFileSize } = require('../../middlewares/upload.middleware');
+    const req = { files: [{ originalname: 'big.png', mimetype: 'image/png', size: 11 * 1024 * 1024 }] };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    await validateFileSize(req, res, () => { throw new Error('should not call next'); });
+    expect(res.status).toHaveBeenCalledWith(413);
+  });
+
+  test('M51: register issues tokens atomically with the account', async () => {
+    const authService = require('../../services/auth.service');
+    const result = await authService.register({ email: 'm51@example.com', password: 'password123', username: 'm51user' });
+    expect(result.accessToken).toBeDefined();
+    expect(result.refreshToken).toBeDefined();
+    expect(result.user).toBeDefined();
+
+    // The account already holds a stored refresh-token hash → no fragile
+    // register-then-login second step can strand it without tokens.
+    const User = mongoose.model('User');
+    const fresh = await User.findOne({ email: 'm51@example.com' }).select('+refreshTokens');
+    expect(fresh.refreshTokens.length).toBe(1);
+
+    // And that token is immediately usable for a refresh
+    const refreshed = await authService.refreshToken(result.refreshToken);
+    expect(refreshed.accessToken).toBeDefined();
+  });
+});
+

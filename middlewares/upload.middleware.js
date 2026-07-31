@@ -33,7 +33,10 @@ const validateFileSize = (req, res, next) => {
     const maxSize = isVideo ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
     
     if (file.size > maxSize) {
-      return res.status(400).json({
+      // M50: an oversize image/video is a 413 Payload Too Large, not a 400.
+      // (Multer's global 100MB limit passes a 20MB image through to this check,
+      // so the per-type cap lives here.)
+      return res.status(413).json({
         success: false,
         message: `File ${file.originalname} exceeds maximum size of ${isVideo ? '100MB' : '10MB'} for ${isVideo ? 'video' : 'image'}`
       });

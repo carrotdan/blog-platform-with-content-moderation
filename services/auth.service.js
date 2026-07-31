@@ -37,9 +37,42 @@ class AuthService {
     return String(email || '').trim().toLowerCase();
   }
 
+  // M51: token issuance is shared between register/login so registration can
+  // create the account and issue tokens in one flow (no fragile second login).
+  _generateTokens(userId, role) {
+    const payload = {
+      userId: userId.toString(),
+      role,
+      jti: crypto.randomUUID()
+    };
+
+    const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+      expiresIn: process.env.JWT_ACCESS_EXPIRE || '15m'
+    });
+
+    const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
+      expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d'
+    });
+
+    return {
+      accessToken,
+      refreshToken,
+      tokenHash: this.hashToken(refreshToken),
+      expiresAt: this.refreshTokenExpiresAt()
+    };
+  }
+
   async register(data) {
     const { password, avatar, bio, username } = data;
     const email = this.normalizeEmail(data.email);
+
+    // M43: defense-in-depth — a javascript:/data: avatar is a stored-XSS vector
+    // when rendered in <img src>, reject it even if route validation is bypassed.
+    if (avatar !== undefined && avatar !== null && avatar !== '' && !/^https?:\/\//i.test(avatar)) {
+      const err = new Error('Avatar must be an http(s) URL');
+      err.statusCode = 400;
+      throw err;
+    }
     
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -65,12 +98,30 @@ class AuthService {
     });
 
     await newUser.save();
-    
-    // Return user without password
-    const userToReturn = newUser.toObject();
-    delete userToReturn.password;
-    
-    return userToReturn;
+
+    // M51: registration is atomic — the account and its tokens are created
+    // together, so a failed post-registration login can no longer strand an
+    // account that has no access/refresh tokens.
+    const tokens = this._generateTokens(newUser._id, 'USER');
+    newUser.refreshTokens.push({ tokenHash: tokens.tokenHash, expiresAt: tokens.expiresAt });
+    await newUser.save();
+
+    // Return the user in the same public shape as login (no password/token hashes)
+    const userToReturn = {
+      id: newUser._id.toString(),
+      email: newUser.email,
+      username: newUser.username,
+      role: newUser.role,
+      avatar: newUser.avatar,
+      bio: newUser.bio,
+      status: newUser.status
+    };
+
+    return {
+      user: userToReturn,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken
+    };
   }
 
   async login(email, password) {
@@ -103,24 +154,7 @@ class AuthService {
     }
 
     // Generate tokens
-    const payload = {
-      userId: user._id.toString(),
-      role: user.role,
-      jti: crypto.randomUUID()
-    };
-
-    const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
-      expiresIn: process.env.JWT_ACCESS_EXPIRE || '15m'
-    });
-
-    const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-      expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d'
-    });
-
-    // Store refresh token hash
-    const tokenHash = this.hashToken(refreshToken);
-    // M34: derive lifetime from JWT_REFRESH_EXPIRE (was hardcoded to 7 days)
-    const expiresAt = this.refreshTokenExpiresAt();
+    const { accessToken, refreshToken, tokenHash, expiresAt } = this._generateTokens(user._id, user.role);
 
     // M26: Clean expired tokens and cap the stored list (keep most recent 5) to
     // prevent unbounded document growth.

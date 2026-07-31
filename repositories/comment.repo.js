@@ -3,7 +3,11 @@ const { getAuthorPopulate } = require('../utils/populate');
 
 class CommentRepository {
   async create(commentData) {
-    return Comment.create(commentData);
+    // M46: createComment returned an unpopulated author (raw ObjectId); match
+    // the author shape returned by every other comment read path.
+    const doc = await Comment.create(commentData);
+    await doc.populate(getAuthorPopulate());
+    return doc;
   }
 
   async findById(id) {
@@ -24,6 +28,23 @@ class CommentRepository {
 
   async updateHidden(id, is_hidden) {
     return Comment.findByIdAndUpdate(id, { is_hidden }, { new: true });
+  }
+
+  // M44: hiding a comment must hide its whole reply subtree — otherwise replies
+  // to a moderated comment stay visible and re-expose the thread. BFS over
+  // parent_id chains, then hides every collected id in one updateMany.
+  async hideSubtree(commentId) {
+    const toHide = [commentId];
+    let frontier = [commentId];
+    while (frontier.length) {
+      const children = await Comment.find({ parent_id: { $in: frontier } }).select('_id');
+      const childIds = children.map(c => c._id);
+      if (!childIds.length) break;
+      toHide.push(...childIds);
+      frontier = childIds;
+    }
+    await Comment.updateMany({ _id: { $in: toHide } }, { is_hidden: true });
+    return toHide;
   }
 
   async findByIdAdmin(id) {

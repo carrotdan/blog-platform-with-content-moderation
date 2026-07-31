@@ -48,7 +48,9 @@ class AdminController {
   async changeRole(req, res, next) {
     try {
       const { role } = req.body;
+      // M49: a missing target must be a 404, not a 200 + null.
       const user = await userRepository.update(req.params.id, { role });
+      if (!user) return res.status(404).json({ success: false, message: 'User not found', data: null });
       res.status(200).json({ success: true, message: 'Role updated', data: user });
     } catch (error) {
       next(error);
@@ -66,7 +68,9 @@ class AdminController {
 
   async hidePost(req, res, next) {
     try {
+      // M49: a missing post must be a 404, not a 200 + null.
       const post = await postRepository.updateVisibility(req.params.id, 'HIDDEN');
+      if (!post) return res.status(404).json({ success: false, message: 'Post not found', data: null });
       res.status(200).json({ success: true, message: 'Post hidden', data: post });
     } catch (error) {
       next(error);
@@ -75,7 +79,9 @@ class AdminController {
 
   async unhidePost(req, res, next) {
     try {
+      // M49: a missing post must be a 404, not a 200 + null.
       const post = await postRepository.updateVisibility(req.params.id, 'PUBLIC');
+      if (!post) return res.status(404).json({ success: false, message: 'Post not found', data: null });
       res.status(200).json({ success: true, message: 'Post restored', data: post });
     } catch (error) {
       next(error);
@@ -84,7 +90,9 @@ class AdminController {
 
   async markSensitive(req, res, next) {
     try {
+      // M49: a missing post must be a 404, not a 200 + null.
       const post = await postRepository.update(req.params.id, { is_sensitive: true });
+      if (!post) return res.status(404).json({ success: false, message: 'Post not found', data: null });
       res.status(200).json({ success: true, message: 'Post marked as sensitive', data: post });
     } catch (error) {
       next(error);
@@ -93,7 +101,9 @@ class AdminController {
 
   async unmarkSensitive(req, res, next) {
     try {
+      // M49: a missing post must be a 404, not a 200 + null.
       const post = await postRepository.update(req.params.id, { is_sensitive: false });
+      if (!post) return res.status(404).json({ success: false, message: 'Post not found', data: null });
       res.status(200).json({ success: true, message: 'Sensitive mark removed', data: post });
     } catch (error) {
       next(error);
@@ -115,7 +125,7 @@ class AdminController {
       // path) instead of duplicating divergent hide/mark logic here.
       const { action } = req.body; // 'HIDE' or 'DISMISS' or 'MARK_SENSITIVE'
       const reportService = require('../services/report.service');
-      const report = await reportService.resolveReport(req.params.id, action);
+      const report = await reportService.resolveReport(req.params.id, action, { moderator_id: req.user.id });
 
       res.status(200).json({
         success: true,
@@ -129,7 +139,9 @@ class AdminController {
 
   async muteUser(req, res, next) {
     try {
+      // M49: a missing target must be a 404, not a 200 + null.
       const user = await userRepository.update(req.params.id, { status: 'MUTED' });
+      if (!user) return res.status(404).json({ success: false, message: 'User not found', data: null });
       res.status(200).json({ success: true, message: 'User muted', data: user });
     } catch (error) {
       next(error);
@@ -138,7 +150,9 @@ class AdminController {
 
   async banUser(req, res, next) {
     try {
+      // M49: a missing target must be a 404, not a 200 + null.
       const user = await userRepository.update(req.params.id, { status: 'BANNED' });
+      if (!user) return res.status(404).json({ success: false, message: 'User not found', data: null });
       res.status(200).json({ success: true, message: 'User banned', data: user });
     } catch (error) {
       next(error);
@@ -147,12 +161,14 @@ class AdminController {
 
   async resetScore(req, res, next) {
     try {
+      // M49: a missing target must be a 404, not a 200 + null.
       const user = await userRepository.update(req.params.id, {
         spamCount: 0,
         toxicCount: 0,
         violationScore: 0,
         status: 'ACTIVE'
       });
+      if (!user) return res.status(404).json({ success: false, message: 'User not found', data: null });
       res.status(200).json({ success: true, message: 'Score reset', data: user });
     } catch (error) {
       next(error);
