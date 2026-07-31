@@ -19,7 +19,7 @@ class AppealRepository {
       .sort({ createdAt: -1 });
   }
 
-  // Kiểm tra user đã kháng cáo nội dung này chưa
+  // Check whether the user already has a pending appeal for this target
   async findExisting(user_id, target_id) {
     return Appeal.findOne({ user_id, target_id, status: 'PENDING' });
   }

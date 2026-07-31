@@ -16,11 +16,20 @@ const ALLOWED_TAGS = [
 ];
 
 const ALLOWED_ATTR = [
-  'href', 'src', 'alt', 'title', 'class', 'id',
-  'style', 'target', 'rel'
+  'href', 'src', 'alt', 'title', 'target', 'rel'
 ];
 
+// M23: DOMPurify's default ALLOWED_URI_REGEXP already permits http/https/mailto/tel
+// and relative URLs while blocking javascript:/data:/vbscript: etc. We must NOT add
+// href/src to URI_SAFE_ATTRIBUTES — doing so disables that URL validation entirely.
 const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+
+// M23: Force safe rel on any link that opens in a new tab (prevents tabnabbing).
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
 
 function sanitizeHtml(html) {
   if (!html || typeof html !== 'string') {
@@ -30,8 +39,6 @@ function sanitizeHtml(html) {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
-    ADD_URI_SAFE_ATTR: ['href', 'src'],
-    URI_SAFE_ATTRIBUTES: ['href', 'src'],
     FORCE_BODY: true,
     RETURN_DOM: false,
     RETURN_DOM_FRAGMENT: false

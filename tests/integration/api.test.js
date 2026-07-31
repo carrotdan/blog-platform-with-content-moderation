@@ -393,3 +393,133 @@ describe('Rate limiting', () => {
   });
 });
 
+describe('Sprint 11 fixes (M16-M31, L17-L26)', () => {
+  let userAToken;
+  let userAId;
+  let postId;
+
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  beforeAll(async () => {
+    const userA = await createUser('sprint11a@example.com', 'sprint11a');
+    userAToken = mintToken(userA._id.toString());
+    userAId = userA._id.toString();
+
+    const postRes = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ content_html: '<p>Sprint 11 post</p>' });
+    postId = postRes.body.data._id;
+  });
+
+  test('M16: unknown routes return a JSON 404', async () => {
+    const res = await request(app).get('/api/v1/nonexistent');
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toBe('Route not found');
+    expect(res.body.requestId).toBeDefined();
+  });
+
+  test('M25: /uploads is no longer served publicly', async () => {
+    const res = await request(app).get('/uploads/media_test.png');
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('M27: duplicate /moderation/report endpoint is removed', async () => {
+    const res = await request(app)
+      .post('/api/v1/moderation/report')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ target_id: postId, target_model: 'Post', reason: 'test' });
+    expect(res.status).toBe(404);
+  });
+
+  test('M20: interaction route validates body (bad type -> 400)', async () => {
+    const res = await request(app)
+      .post('/api/v1/interactions')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ target_id: postId, target_model: 'Post', type: 'NOT_A_TYPE' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('M20: follow route validates body (missing following_id -> 400)', async () => {
+    const res = await request(app)
+      .post('/api/v1/follows')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  test('M31: liking a hidden post is rejected', async () => {
+    const Post = mongoose.model('Post');
+    const hidden = await Post.create({
+      author: userAId,
+      slug: `sprint11-hidden-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>hidden</p>',
+      visibility: 'HIDDEN',
+      status: 'PUBLISHED'
+    });
+    const res = await request(app)
+      .post('/api/v1/interactions')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ target_id: hidden._id.toString(), target_model: 'Post', type: 'LIKE' });
+    expect(res.status).toBe(403);
+  });
+
+  test('M21: AI moderation fields persist on the post', async () => {
+    const res = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ content_html: '<p>AI fields</p>' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.label).toBe('NORMAL');
+    expect(typeof res.body.data.spam_score).toBe('number');
+    expect(typeof res.body.data.toxicity_score).toBe('number');
+  });
+
+  test('M29: duplicate conversation creation returns the same conversation', async () => {
+    const userB = await createUser('sprint11b@example.com', 'sprint11b');
+    const userBToken = mintToken(userB._id.toString());
+
+    const first = await request(app)
+      .post('/api/v1/messages/conversations')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ recipientId: userB._id.toString() });
+    const second = await request(app)
+      .post('/api/v1/messages/conversations')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ recipientId: userB._id.toString() });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.body.data._id).toBe(second.body.data._id);
+  });
+
+  test('M19: getMyPosts supports pagination meta', async () => {
+    const res = await request(app)
+      .get('/api/v1/posts/me/posts?skip=0&limit=2')
+      .set('Authorization', `Bearer ${userAToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.meta).toBeDefined();
+    expect(res.body.meta.limit).toBe(2);
+    expect(typeof res.body.meta.total).toBe('number');
+  });
+});
+

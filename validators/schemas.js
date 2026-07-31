@@ -92,6 +92,34 @@ const createCommentSchema = z.object({
   })
 });
 
+const interactSchema = z.object({
+  body: z.object({
+    target_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid target ID'),
+    target_model: z.enum(['Post', 'Comment']),
+    type: z.enum(['LIKE', 'BOOKMARK'])
+  })
+});
+
+const bookmarkSchema = z.object({
+  body: z.object({
+    target_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid target ID')
+  })
+});
+
+const followSchema = z.object({
+  body: z.object({
+    following_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid user ID')
+  })
+});
+
+const reportSchema = z.object({
+  body: z.object({
+    target_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid target ID'),
+    target_model: z.enum(['Post', 'Comment']),
+    reason: z.string().min(1, 'Reason is required').max(500)
+  })
+});
+
 const appealSchema = z.object({
   body: z.object({
     target_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid target ID'),
@@ -163,6 +191,10 @@ module.exports = {
   getPostSchema,
   getPostBySlugSchema,
   createCommentSchema,
+  interactSchema,
+  bookmarkSchema,
+  followSchema,
+  reportSchema,
   appealSchema,
   approveAppealSchema,
   rejectAppealSchema,

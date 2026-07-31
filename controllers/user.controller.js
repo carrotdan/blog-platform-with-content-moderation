@@ -194,8 +194,15 @@ class UserController {
   async getBookmarks(req, res, next) {
     try {
       const postService = require('../services/post.service');
-      const posts = await postService.getBookmarkedPosts(req.user.id);
-      res.status(200).json({ success: true, message: 'Bookmarks retrieved', data: posts });
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 10, 50);
+      const { posts, total } = await postService.getBookmarkedPosts(req.user.id, skip, limit);
+      res.status(200).json({
+        success: true,
+        message: 'Bookmarks retrieved',
+        data: posts,
+        meta: { total, skip, limit }
+      });
     } catch (error) {
       next(error);
     }

@@ -23,11 +23,14 @@ const errorMiddleware = (err, req, res, next) => {
     message = Object.values(err.errors).map(val => val.message).join(', ');
   }
 
+  // L20: Only expose stack traces when explicitly enabled via DEBUG_ERROR_STACK,
+  // never automatically in development/test (avoids leaking internal paths).
+  const showStack = process.env.DEBUG_ERROR_STACK === 'true';
   res.status(statusCode).json({
     success: false,
     message,
     requestId: req.requestId,
-    data: process.env.NODE_ENV === 'production' ? null : err.stack
+    data: showStack ? err.stack : null
   });
 };
 

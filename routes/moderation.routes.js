@@ -5,7 +5,6 @@ const { authenticate, authorize, checkStatus } = require('../middlewares/auth.mi
 const { validate } = require('../middlewares/validate.middleware');
 const { idParamSchema } = require('../validators/schemas');
 
-router.post('/report', authenticate, checkStatus, moderationController.reportContent);
 router.post('/log', authenticate, checkStatus, authorize(['MODERATOR', 'ADMIN']), moderationController.logAction);
 
 router.get('/queue', authenticate, checkStatus, authorize(['MODERATOR', 'ADMIN']), moderationController.getQueue);

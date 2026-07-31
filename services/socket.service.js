@@ -36,7 +36,9 @@ module.exports = {
 
     // Auth middleware for socket connections
     io.use((socket, next) => {
-      const token = socket.handshake.auth.token || socket.handshake.query.token;
+      // L21: Only accept the token via handshake.auth — never via query string,
+      // which would leak the access token into logs/history.
+      const token = socket.handshake.auth.token;
       
       if (!token) {
         return next(new Error('Authentication required'));

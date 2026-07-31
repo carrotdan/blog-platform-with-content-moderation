@@ -93,7 +93,13 @@ class AuthService {
     const tokenHash = this.hashToken(refreshToken);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
+    // M26: Clean expired tokens and cap the stored list (keep most recent 5) to
+    // prevent unbounded document growth.
+    this.cleanExpiredTokens(user);
     user.refreshTokens.push({ tokenHash, expiresAt });
+    if (user.refreshTokens.length > 5) {
+      user.refreshTokens = user.refreshTokens.slice(-5);
+    }
     await user.save();
 
     return {
@@ -167,6 +173,10 @@ class AuthService {
       const newTokenHash = this.hashToken(newRefreshToken);
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
       user.refreshTokens.push({ tokenHash: newTokenHash, expiresAt });
+      // M26: Cap the stored list to the most recent 5 sessions.
+      if (user.refreshTokens.length > 5) {
+        user.refreshTokens = user.refreshTokens.slice(-5);
+      }
 
       await user.save();
 

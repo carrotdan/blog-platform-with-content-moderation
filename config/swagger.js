@@ -1,6 +1,24 @@
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
+// L22: Prefer an explicit API_BASE_URL; fall back to the legacy heuristic only
+// when it is not configured (and never crash on comma-separated origins).
+function resolveServerUrl() {
+  if (process.env.API_BASE_URL) return process.env.API_BASE_URL;
+
+  const clientUrl = process.env.CLIENT_URL || '';
+  const firstOrigin = clientUrl.split(',')[0].trim();
+  if (firstOrigin) {
+    try {
+      const parsed = new URL(firstOrigin);
+      return `${parsed.protocol}//${parsed.hostname}:5000`;
+    } catch {
+      return 'http://localhost:5000';
+    }
+  }
+  return 'http://localhost:5000';
+}
+
 const options = {
   definition: {
     openapi: '3.0.0',
@@ -15,7 +33,7 @@ const options = {
     },
     servers: [
       {
-        url: process.env.CLIENT_URL?.replace(3000, 5000) || 'http://localhost:5000',
+        url: resolveServerUrl(),
         description: 'Development server'
       }
     ],
@@ -38,7 +56,7 @@ const options = {
             avatar: { type: 'string' },
             bio: { type: 'string' },
             violationScore: { type: 'integer' },
-            status: { type: 'string', enum: ['ACTIVE', 'MUTED', 'BANNED', 'DELETED'] },
+            status: { type: 'string', enum: ['ACTIVE', 'MUTED', 'BANNED', 'WARNING'] },
             createdAt: { type: 'string', format: 'date-time' }
           }
         },
@@ -51,7 +69,11 @@ const options = {
             content_json: { type: 'object' },
             slug: { type: 'string' },
             tags: { type: 'array', items: { type: 'string' } },
+            status: { type: 'string', enum: ['DRAFT', 'PUBLISHED'] },
             visibility: { type: 'string', enum: ['PUBLIC', 'PRIVATE', 'HIDDEN'] },
+            spam_score: { type: 'number' },
+            toxicity_score: { type: 'number' },
+            label: { type: 'string', enum: ['NORMAL', 'SPAM', 'TOXIC', 'AI_UNAVAILABLE'] },
             author: { $ref: '#/components/schemas/User' },
             original_post: { $ref: '#/components/schemas/Post' },
             media: {
@@ -137,8 +159,6 @@ const options = {
             target_model: { type: 'string', enum: ['Post', 'Comment'] },
             reason: { type: 'string' },
             status: { type: 'string', enum: ['PENDING', 'RESOLVED', 'DISMISSED'] },
-            resolved_by: { $ref: '#/components/schemas/User' },
-            admin_note: { type: 'string' },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' }
           }

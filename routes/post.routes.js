@@ -11,7 +11,8 @@ const {
   repostSchema, 
   listPostsSchema, 
   getPostSchema,
-  getPostBySlugSchema
+  getPostBySlugSchema,
+  paginationSchema
 } = require('../validators/schemas');
 
 const contentCreateLimiter = rateLimit({
@@ -31,8 +32,8 @@ const contentActionLimiter = rateLimit({
 });
 
 router.get('/', optionalAuthenticate, validate(listPostsSchema), postController.listPosts);
-router.get('/me/posts', authenticate, checkStatus, postController.getMyPosts);
-router.get('/me/bookmarks', authenticate, checkStatus, postController.getBookmarkedPosts);
+router.get('/me/posts', authenticate, checkStatus, validate(paginationSchema), postController.getMyPosts);
+router.get('/me/bookmarks', authenticate, checkStatus, validate(paginationSchema), postController.getBookmarkedPosts);
 router.get('/:id', optionalAuthenticate, validate(getPostSchema), postController.getPost);
 router.get('/slug/:slug', optionalAuthenticate, validate(getPostBySlugSchema), postController.getPostBySlug);
 

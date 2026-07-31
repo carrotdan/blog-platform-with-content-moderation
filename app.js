@@ -3,7 +3,6 @@ const { validateEnv } = require('./config/env');
 validateEnv();
 
 const express = require('express');
-const path = require('path');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -46,9 +45,6 @@ app.use(morgan('dev'));
 app.use(requestIdMiddleware);
 app.use(addRequestIdToLogger);
 
-// Serve static files from uploads folder
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
 // Swagger API Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   customCss: '.swagger-ui .topbar { display: none }',
@@ -57,6 +53,16 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
 
 // Routes
 app.use('/api', routes);
+
+// M16: JSON 404 handler for unknown routes (consistent with the JSON API contract)
+app.use((req, res, next) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    requestId: req.requestId,
+    data: null
+  });
+});
 
 // Error Handling
 app.use(errorMiddleware);
@@ -129,8 +135,7 @@ async function startServer() {
     maxPoolSize: 10,
     minPoolSize: 2,
     socketTimeoutMS: 45000,
-    serverSelectionTimeoutMS: 5000,
-    family: 4
+    serverSelectionTimeoutMS: 5000
   });
   console.log('Connected to MongoDB');
   server.listen(PORT, () => {

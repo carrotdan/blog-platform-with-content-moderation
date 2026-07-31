@@ -1,17 +1,6 @@
 const moderationRepository = require('../repositories/moderation.repo');
 
 class ModerationService {
-  async reportContent(reporter_id, data) {
-    const { target_id, target_model, reason } = data;
-    
-    return moderationRepository.createReport({
-      reporter_id,
-      target_id,
-      target_model,
-      reason
-    });
-  }
-
   async logModerationAction(moderator_id, data) {
     const { target_id, target_model, action, reason } = data;
 
@@ -65,14 +54,14 @@ class ModerationService {
 
     if (item.target_model === 'Comment') {
       const Comment = require('../models/Comment');
-      // Comment: đánh dấu nhạy cảm, vẫn hiện nhưng bị blur
+      // Mark as sensitive: still visible but blurred in the UI
       await Comment.findByIdAndUpdate(item.target_id, {
         is_sensitive: true,
-        is_hidden: false   // không ẩn hoàn toàn
+        is_hidden: false   // do not fully hide
       });
     } else if (item.target_model === 'Post') {
       const Post = require('../models/Post');
-      // Post: đánh dấu nhạy cảm, vẫn PUBLIC nhưng có overlay cảnh báo
+      // Mark as sensitive: stays PUBLIC but shows a warning overlay
       await Post.findByIdAndUpdate(item.target_id, {
         is_sensitive: true,
         visibility: 'PUBLIC'

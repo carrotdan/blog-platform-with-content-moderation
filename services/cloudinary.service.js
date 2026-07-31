@@ -34,4 +34,20 @@ const uploadToCloudinary = (fileBuffer, folder, resourceType = 'auto') => {
   });
 };
 
-module.exports = { uploadToCloudinary, cloudinary, configureCloudinary };
+// M18: Destroy a list of Cloudinary assets by public_id. Best-effort —
+// missing/invalid ids are skipped and never reject the caller.
+const destroyAssets = async (publicIds = []) => {
+  if (!Array.isArray(publicIds) || publicIds.length === 0) return;
+
+  configureCloudinary();
+
+  const results = await Promise.allSettled(
+    publicIds
+      .filter(id => typeof id === 'string' && id.length > 0)
+      .map(id => cloudinary.uploader.destroy(id))
+  );
+
+  return results.map(r => r.status === 'fulfilled' ? r.value : null);
+};
+
+module.exports = { uploadToCloudinary, destroyAssets, cloudinary, configureCloudinary };

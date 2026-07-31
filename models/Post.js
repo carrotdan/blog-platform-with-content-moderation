@@ -15,6 +15,10 @@ const postSchema = new mongoose.Schema(
     is_sensitive: { type: Boolean, default: false },
     tags: [{ type: String }],
     original_post: { type: mongoose.Schema.Types.ObjectId, ref: 'Post', default: null },
+    // M21: AI moderation fields persisted on the post itself
+    spam_score: { type: Number, default: 0 },
+    toxicity_score: { type: Number, default: 0 },
+    label: { type: String, enum: ['NORMAL', 'SPAM', 'TOXIC', 'AI_UNAVAILABLE'], default: 'NORMAL' },
     media: [{
       type: { type: String, enum: ['IMAGE', 'VIDEO'] },
       url: String,

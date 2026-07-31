@@ -355,7 +355,14 @@ async updatePost(id, data, user_id) {
     if (post.author._id.toString() !== user_id.toString()) {
       throw new Error('Unauthorized to delete this post');
     }
-    return postRepository.delete(id);
+    const deleted = await postRepository.delete(id);
+    // M18: Clean up Cloudinary assets for the deleted post
+    if (deleted) {
+      const { destroyAssets } = require('./cloudinary.service');
+      const publicIds = (deleted.media || []).map(m => m.public_id);
+      await destroyAssets(publicIds);
+    }
+    return deleted;
   }
 
   async getMyPosts(user_id, skip = 0, limit = 10) {
@@ -363,15 +370,23 @@ async updatePost(id, data, user_id) {
     return this._enrichPosts(posts, user_id);
   }
 
+  async countMyPosts(user_id) {
+    return postRepository.countByAuthor(user_id);
+  }
+
   async getPostsByUser(user_id, current_user_id = null, skip = 0, limit = 10) {
     const posts = await postRepository.findByAuthor(user_id, skip, limit);
     return this._enrichPosts(posts, current_user_id);
   }
 
-  async getBookmarkedPosts(user_id) {
+  async getBookmarkedPosts(user_id, skip = 0, limit = 10) {
     const Interaction = require('../models/Interaction');
     
-    const interactions = await Interaction.find({ user_id, type: 'BOOKMARK', target_model: 'Post' }).sort({ createdAt: -1 });
+    const total = await Interaction.countDocuments({ user_id, type: 'BOOKMARK', target_model: 'Post' });
+    const interactions = await Interaction.find({ user_id, type: 'BOOKMARK', target_model: 'Post' })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
     const postIds = interactions.map(i => i.target_id);
     
     const posts = await Post.find({ _id: { $in: postIds } }).populate('author', 'username avatar');
@@ -383,7 +398,7 @@ async updatePost(id, data, user_id) {
     }, {});
     
     const orderedPosts = postIds.map(id => postMap[id.toString()]).filter(Boolean);
-    return this._enrichPosts(orderedPosts, user_id);
+    return { posts: this._enrichPosts(orderedPosts, user_id), total };
   }
 
   async _enrichPosts(posts, current_user_id) {

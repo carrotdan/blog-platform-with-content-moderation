@@ -1,19 +1,6 @@
 const moderationService = require('../services/moderation.service');
 
 class ModerationController {
-  async reportContent(req, res, next) {
-    try {
-      const report = await moderationService.reportContent(req.user.id, req.body);
-      res.status(201).json({
-        success: true,
-        message: 'Content reported successfully',
-        data: report
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
   async logAction(req, res, next) {
     try {
       const log = await moderationService.logModerationAction(req.user.id, req.body);

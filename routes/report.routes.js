@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const reportController = require('../controllers/report.controller');
 const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
-const { idParamSchema } = require('../validators/schemas');
+const { idParamSchema, reportSchema } = require('../validators/schemas');
 
 const contentCreateLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -14,7 +14,7 @@ const contentCreateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-router.post('/', authenticate, checkStatus, contentCreateLimiter, reportController.createReport);
+router.post('/', authenticate, checkStatus, contentCreateLimiter, validate(reportSchema), reportController.createReport);
 
 // Admin routes
 router.get('/', authenticate, authorize(['ADMIN']), reportController.listReports);

@@ -1,8 +1,8 @@
 """
 AI Microservice - XLM-Roberta Content Classification
-Model đã fine-tuned với 2 labels:
-  - LABEL_0 (L0): TOXIC  - phát hiện nội dung độc hại, thù hận
-  - LABEL_1 (L1): SPAM   - phát hiện spam, quảng cáo rác
+Model fine-tuned with 2 labels:
+  - LABEL_0 (L0): TOXIC  - detects harmful, hateful content
+  - LABEL_1 (L1): SPAM   - detects spam, unsolicited ads
 """
 
 import os
@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import uvicorn
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = Path(__file__).parent.parent / "final_model"
 PORT = int(os.environ.get("AI_PORT", 8000))
 
-# Threshold để quyết định label (dựa trên kết quả test)
+# Threshold to decide the label (based on test results)
 SPAM_THRESHOLD = 0.5    # LABEL_1 (L1)
 TOXIC_THRESHOLD = 0.5   # LABEL_0 (L0)
 
@@ -52,8 +52,12 @@ model = None
 device = None
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
+# M24: Cap input length so a single oversized request cannot flood tokenizer
+# memory (Node already caps request bodies at 1MB, but defense in depth).
+MAX_TEXT_LENGTH = 10000
+
 class AnalyzeRequest(BaseModel):
-    text: str
+    text: str = Field(..., max_length=MAX_TEXT_LENGTH)
 
 class AnalyzeResponse(BaseModel):
     spam_score: float
@@ -72,7 +76,7 @@ async def load_model():
         logger.error(f"Model directory not found: {MODEL_DIR}")
         raise RuntimeError(f"Model directory not found: {MODEL_DIR}")
 
-    # Chọn device
+    # Select device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
 
@@ -120,7 +124,7 @@ async def analyze(req: AnalyzeRequest):
             raw_scores={"TOXIC": 0.0, "SPAM": 0.0}
         )
 
-    # Tokenize (tối đa 512 tokens)
+    # Tokenize (max 512 tokens)
     inputs = tokenizer(
         text,
         return_tensors="pt",
@@ -134,14 +138,14 @@ async def analyze(req: AnalyzeRequest):
         outputs = model(**inputs)
         logits = outputs.logits  # shape: [1, 2]
 
-    # Multi-label: dùng sigmoid (không phải softmax)
+    # Multi-label: use sigmoid (not softmax)
     probs = torch.sigmoid(logits).squeeze().cpu().tolist()
 
-    # Đảm bảo probs là list 2 phần tử
+    # Ensure probs is a list of 2 elements
     if isinstance(probs, float):
         probs = [probs, 0.0]
 
-    # LABEL_0 = TOXIC, LABEL_1 = SPAM (từ kết quả test)
+    # LABEL_0 = TOXIC, LABEL_1 = SPAM (from test results)
     toxicity_score = float(probs[0])
     spam_score = float(probs[1])
 
@@ -150,7 +154,7 @@ async def analyze(req: AnalyzeRequest):
         "SPAM": round(spam_score, 4)
     }
 
-    # Quyết định label tổng (ưu tiên TOXIC > SPAM > NORMAL)
+    # Decide the overall label (TOXIC takes priority over SPAM over NORMAL)
     if toxicity_score >= TOXIC_THRESHOLD and toxicity_score >= spam_score:
         final_label = "TOXIC"
     elif spam_score >= SPAM_THRESHOLD:

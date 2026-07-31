@@ -44,6 +44,26 @@ describe('HTML Sanitization', () => {
       const output = sanitizeHtml(input);
       expect(output).not.toContain('onclick');
     });
+
+    test('M23: should remove style attributes (CSS injection)', () => {
+      const input = '<div style="position:fixed; z-index:9999; background:url(https://evil.com/track.gif)">Overlay</div>';
+      const output = sanitizeHtml(input);
+      expect(output).not.toContain('style');
+      expect(output).toBe('<div>Overlay</div>');
+    });
+
+    test('M23: should force rel=noopener noreferrer on target=_blank links', () => {
+      const input = '<a href="https://example.com" target="_blank">Link</a>';
+      const output = sanitizeHtml(input);
+      expect(output).toContain('rel="noopener noreferrer"');
+      expect(output).toContain('target="_blank"');
+    });
+
+    test('M23: javascript: URLs are stripped even with href allow-listed', () => {
+      const input = '<a href="javascript:alert(1)">Click</a>';
+      const output = sanitizeHtml(input);
+      expect(output).not.toContain('javascript:');
+    });
   });
 
   describe('sanitizeText', () => {

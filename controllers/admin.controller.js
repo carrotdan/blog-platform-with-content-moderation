@@ -174,6 +174,10 @@ class AdminController {
       if (!post) {
         return res.status(404).json({ success: false, message: 'Post not found' });
       }
+      // M18: Clean up Cloudinary assets for the deleted post
+      const { destroyAssets } = require('../services/cloudinary.service');
+      const publicIds = (post.media || []).map(m => m.public_id);
+      await destroyAssets(publicIds);
       res.status(200).json({ success: true, message: 'Post deleted successfully' });
     } catch (error) {
       next(error);

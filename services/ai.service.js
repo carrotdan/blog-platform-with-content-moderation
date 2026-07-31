@@ -78,10 +78,10 @@ class AIService {
   }
 
   /**
-   * Phân tích văn bản để phát hiện spam và toxicity.
-   * Gọi Python microservice chạy model XLM-Roberta đã fine-tuned.
+   * Analyze text to detect spam and toxicity.
+   * Calls the Python microservice running the fine-tuned XLM-Roberta model.
    *
-   * @param {string} text - Văn bản cần phân tích
+   * @param {string} text - Text to analyze
    * @returns {Promise<{spam_score: number, toxicity_score: number, label: string}>}
    */
   async analyze(text) {
@@ -154,7 +154,7 @@ class AIService {
 
   /**
    * Async analyze - returns immediately with PENDING, processes in background
-   * @param {string} text - Văn bản cần phân tích
+   * @param {string} text - Text to analyze
    * @param {Function} callback - Callback when analysis completes
    */
   async analyzeAsync(text, callback) {
@@ -179,7 +179,7 @@ class AIService {
   }
 
   /**
-   * Kiểm tra xem Python AI service có đang chạy không
+   * Check whether the Python AI service is running
    * @returns {Promise<boolean>}
    */
   async isHealthy() {

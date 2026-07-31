@@ -44,6 +44,10 @@ class PostRepository {
       .sort({ createdAt: -1 });
   }
 
+  async countByAuthor(authorId) {
+    return Post.countDocuments({ author: authorId });
+  }
+
   async countReposts(originalPostId) {
     return Post.countDocuments({ original_post: originalPostId });
   }

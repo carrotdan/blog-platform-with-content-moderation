@@ -1,7 +1,5 @@
 const postService = require('../services/post.service');
 const { uploadToCloudinary } = require('../services/cloudinary.service');
-const fs = require('fs');
-const path = require('path');
 const { sanitizeHtml } = require('../utils/sanitize');
 
 class PostController {
@@ -56,7 +54,10 @@ class PostController {
 
       const post = await postService.createPost(req.user.id, postData);
       
-      const io = req.app.get('io');
+      // M17: Socket.io is registered on the socket.service module, not via
+      // app.set('io'). Use getIO() so the real-time event actually fires.
+      const { getIO } = require('../services/socket.service');
+      const io = getIO();
       if (io && post.visibility === 'PUBLIC') {
         io.emit('new_post', post);
       }
@@ -179,8 +180,18 @@ class PostController {
 
   async getMyPosts(req, res, next) {
     try {
-      const posts = await postService.getMyPosts(req.user.id);
-      res.status(200).json({ success: true, message: 'User posts retrieved', data: posts });
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 10, 50);
+      const [posts, total] = await Promise.all([
+        postService.getMyPosts(req.user.id, skip, limit),
+        postService.countMyPosts(req.user.id)
+      ]);
+      res.status(200).json({
+        success: true,
+        message: 'User posts retrieved',
+        data: posts,
+        meta: { total, skip, limit }
+      });
     } catch (error) {
       next(error);
     }
@@ -188,8 +199,15 @@ class PostController {
 
   async getBookmarkedPosts(req, res, next) {
     try {
-      const posts = await postService.getBookmarkedPosts(req.user.id);
-      res.status(200).json({ success: true, message: 'Bookmarked posts retrieved', data: posts });
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 10, 50);
+      const { posts, total } = await postService.getBookmarkedPosts(req.user.id, skip, limit);
+      res.status(200).json({
+        success: true,
+        message: 'Bookmarked posts retrieved',
+        data: posts,
+        meta: { total, skip, limit }
+      });
     } catch (error) {
       next(error);
     }
