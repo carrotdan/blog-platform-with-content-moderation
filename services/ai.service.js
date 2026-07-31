@@ -5,6 +5,7 @@
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '5000');
+const logger = require('../utils/logger');
 
 class AIService {
   constructor() {
@@ -36,7 +37,7 @@ class AIService {
       if (timeSinceLastFailure > this.circuitBreaker.resetTimeout) {
         this.circuitBreaker.state = 'HALF_OPEN';
       } else {
-        console.warn('[AIService] Circuit breaker OPEN - failing closed');
+        logger.warn('[AIService] Circuit breaker OPEN - failing closed');
         return {
           spam_score: 0.5,
           toxicity_score: 0.5,
@@ -84,11 +85,11 @@ class AIService {
       }
 
       if (error.name === 'AbortError') {
-        console.warn('[AIService] Request timed out - failing closed');
+        logger.warn('[AIService] Request timed out - failing closed');
       } else if (error.code === 'ECONNREFUSED' || error.cause?.code === 'ECONNREFUSED') {
-        console.warn('[AIService] Python service unavailable (ECONNREFUSED) - failing closed');
+        logger.warn('[AIService] Python service unavailable (ECONNREFUSED) - failing closed');
       } else {
-        console.error('[AIService] Error calling AI microservice:', error.message);
+        logger.error('[AIService] Error calling AI microservice', { error: error.message });
       }
 
       // Fail-closed: if AI service unavailable, treat as potentially harmful

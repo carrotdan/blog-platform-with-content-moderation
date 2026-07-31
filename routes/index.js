@@ -14,17 +14,27 @@ const reportRoutes = require('./report.routes');
 const messageRoutes = require('./message.routes');
 const appealRoutes = require('./appeal.routes');
 
-router.use('/auth', authRoutes);
-router.use('/users', userRoutes);
-router.use('/posts', postRoutes);
-router.use('/comments', commentRoutes);
-router.use('/interactions', interactionRoutes);
-router.use('/follows', followRoutes);
-router.use('/notifications', notificationRoutes);
-router.use('/moderation', moderationRoutes);
-router.use('/admin', adminRoutes);
-router.use('/reports', reportRoutes);
-router.use('/messages', messageRoutes);
-router.use('/appeals', appealRoutes);
+// API v1 routes
+const v1Router = express.Router();
+
+v1Router.use('/auth', authRoutes);
+v1Router.use('/users', userRoutes);
+v1Router.use('/posts', postRoutes);
+v1Router.use('/comments', commentRoutes);
+v1Router.use('/interactions', interactionRoutes);
+v1Router.use('/follows', followRoutes);
+v1Router.use('/notifications', notificationRoutes);
+v1Router.use('/moderation', moderationRoutes);
+v1Router.use('/admin', adminRoutes);
+v1Router.use('/reports', reportRoutes);
+v1Router.use('/messages', messageRoutes);
+v1Router.use('/appeals', appealRoutes);
+
+router.use('/v1', v1Router);
+
+// Health check endpoint (no version)
+router.get('/health', (req, res) => {
+  res.json({ success: true, message: 'API is healthy', version: '1.0.0' });
+});
 
 module.exports = router;

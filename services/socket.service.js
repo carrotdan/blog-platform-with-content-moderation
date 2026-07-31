@@ -1,4 +1,6 @@
 const socketIo = require('socket.io');
+const jwt = require('jsonwebtoken');
+const logger = require('../utils/logger');
 
 let io;
 
@@ -6,19 +8,39 @@ module.exports = {
   io: null,
   init: (server) => {
     io = socketIo(server, {
-      cors: { origin: '*' }
+      cors: { origin: process.env.CLIENT_URL || 'http://localhost:3000' }
+    });
+
+    // Auth middleware for socket connections
+    io.use((socket, next) => {
+      const token = socket.handshake.auth.token || socket.handshake.query.token;
+      
+      if (!token) {
+        return next(new Error('Authentication required'));
+      }
+      
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+        socket.userId = decoded.userId || decoded.id;
+        socket.userRole = decoded.role;
+        next();
+      } catch (err) {
+        next(new Error('Invalid token'));
+      }
     });
 
     io.on('connection', (socket) => {
-      console.log('Client connected:', socket.id);
+      logger.info('Client connected', { socketId: socket.id, userId: socket.userId });
 
-      socket.on('join_user_room', (userId) => {
-        socket.join(userId.toString());
-        console.log(`User ${userId} joined room`);
+      socket.on('join_user_room', () => {
+        if (socket.userId) {
+          socket.join(socket.userId.toString());
+          logger.info('User joined room', { userId: socket.userId });
+        }
       });
 
       socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id);
+        logger.info('Client disconnected', { socketId: socket.id });
       });
     });
     
@@ -28,7 +50,7 @@ module.exports = {
   
   getIO: () => {
     if (!io) {
-      console.warn('Socket.io is not initialized yet!');
+      logger.warn('Socket.io is not initialized yet!');
       return null;
     }
     return io;

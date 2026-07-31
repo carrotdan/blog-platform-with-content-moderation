@@ -17,36 +17,16 @@ class PostController {
       if (files.length > 0) {
         const uploadPromises = files.map(async (file, index) => {
           const isVideo = file.mimetype.startsWith('video/');
-          try {
-            if (!process.env.CLOUDINARY_API_KEY) throw new Error("No API Key");
-            const result = await uploadToCloudinary(file.buffer, 'posts_media', isVideo ? 'video' : 'image');
-            return {
-              type: isVideo ? 'VIDEO' : 'IMAGE',
-              url: result.secure_url,
-              public_id: result.public_id,
-              width: result.width,
-              height: result.height,
-              duration: result.duration,
-              order_index: index
-            };
-          } catch (err) {
-            // Fallback to local storage
-            const uploadDir = path.join(__dirname, '..', 'uploads');
-            if (!fs.existsSync(uploadDir)) {
-              fs.mkdirSync(uploadDir, { recursive: true });
-            }
-            const ext = path.extname(file.originalname) || (isVideo ? '.mp4' : '.jpg');
-            const filename = `media_${Date.now()}_${index}${ext}`;
-            const filepath = path.join(uploadDir, filename);
-            fs.writeFileSync(filepath, file.buffer);
-            
-            return {
-              type: isVideo ? 'VIDEO' : 'IMAGE',
-              url: `http://localhost:5000/uploads/${filename}`,
-              public_id: filename,
-              order_index: index
-            };
-          }
+          const result = await uploadToCloudinary(file.buffer, 'posts_media', isVideo ? 'video' : 'image');
+          return {
+            type: isVideo ? 'VIDEO' : 'IMAGE',
+            url: result.secure_url,
+            public_id: result.public_id,
+            width: result.width,
+            height: result.height,
+            duration: result.duration,
+            order_index: index
+          };
         });
         
         uploadedMedia = await Promise.all(uploadPromises);

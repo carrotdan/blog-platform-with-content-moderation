@@ -90,7 +90,7 @@ const checkStatus = async (req, res, next) => {
     if (user.status === 'BANNED') {
       return res.status(403).json({
         success: false,
-        message: 'Tài khoản của bạn đã bị khóa.'
+        message: 'Your account has been banned.'
       });
     }
 
@@ -99,7 +99,7 @@ const checkStatus = async (req, res, next) => {
       if (writeMethods.includes(req.method)) {
         return res.status(403).json({
           success: false,
-          message: 'Tài khoản của bạn đang bị hạn chế tương tác và đăng nội dung.'
+          message: 'Your account is muted and cannot perform this action.'
         });
       }
     }
