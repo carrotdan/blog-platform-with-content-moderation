@@ -1,11 +1,12 @@
 /**
- * AI Service - Kết nối với Python XLM-Roberta Microservice
- * để phân loại nội dung: NORMAL, SPAM, TOXIC
+ * AI Service - Connects to Python XLM-Roberta Microservice
+ * to classify content: NORMAL, SPAM, TOXIC
  */
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '5000');
 const logger = require('../utils/logger');
+const { Mutex } = require('async-mutex');
 
 class AIService {
   constructor() {
@@ -16,6 +17,64 @@ class AIService {
       threshold: 5,
       resetTimeout: 60000
     };
+    this.circuitBreakerMutex = new Mutex();
+  }
+
+  /**
+   * Get circuit breaker state atomically
+   */
+  async getCircuitBreakerState() {
+    return this.circuitBreakerMutex.runExclusive(() => ({
+      state: this.circuitBreaker.state,
+      failures: this.circuitBreaker.failures,
+      lastFailure: this.circuitBreaker.lastFailure
+    }));
+  }
+
+  /**
+   * Update circuit breaker on failure atomically
+   */
+  async recordFailure() {
+    return this.circuitBreakerMutex.runExclusive(() => {
+      this.circuitBreaker.failures++;
+      this.circuitBreaker.lastFailure = Date.now();
+      
+      if (this.circuitBreaker.failures >= this.circuitBreaker.threshold) {
+        this.circuitBreaker.state = 'OPEN';
+      }
+      
+      return {
+        failures: this.circuitBreaker.failures,
+        state: this.circuitBreaker.state
+      };
+    });
+  }
+
+  /**
+   * Reset circuit breaker on success atomically
+   */
+  async resetCircuitBreaker() {
+    return this.circuitBreakerMutex.runExclusive(() => {
+      this.circuitBreaker.failures = 0;
+      this.circuitBreaker.state = 'CLOSED';
+    });
+  }
+
+  /**
+   * Check and update circuit breaker state atomically
+   */
+  async checkAndUpdateCircuitBreaker() {
+    return this.circuitBreakerMutex.runExclusive(() => {
+      if (this.circuitBreaker.state === 'OPEN') {
+        const timeSinceLastFailure = Date.now() - this.circuitBreaker.lastFailure;
+        if (timeSinceLastFailure > this.circuitBreaker.resetTimeout) {
+          this.circuitBreaker.state = 'HALF_OPEN';
+          return { allowRequest: true, state: 'HALF_OPEN' };
+        }
+        return { allowRequest: false, state: 'OPEN' };
+      }
+      return { allowRequest: true, state: this.circuitBreaker.state };
+    });
   }
 
   /**
@@ -26,24 +85,20 @@ class AIService {
    * @returns {Promise<{spam_score: number, toxicity_score: number, label: string}>}
    */
   async analyze(text) {
-    // Nếu text rỗng, trả về NORMAL ngay
+    // If text is empty, return NORMAL immediately
     if (!text || text.trim().length === 0) {
       return { spam_score: 0.05, toxicity_score: 0.05, label: 'NORMAL' };
     }
 
-    // Check circuit breaker
-    if (this.circuitBreaker.state === 'OPEN') {
-      const timeSinceLastFailure = Date.now() - this.circuitBreaker.lastFailure;
-      if (timeSinceLastFailure > this.circuitBreaker.resetTimeout) {
-        this.circuitBreaker.state = 'HALF_OPEN';
-      } else {
-        logger.warn('[AIService] Circuit breaker OPEN - failing closed');
-        return {
-          spam_score: 0.5,
-          toxicity_score: 0.5,
-          label: 'AI_UNAVAILABLE'
-        };
-      }
+    // Check circuit breaker atomically
+    const circuitBreakerCheck = await this.checkAndUpdateCircuitBreaker();
+    if (!circuitBreakerCheck.allowRequest) {
+      logger.warn('[AIService] Circuit breaker OPEN - failing closed');
+      return {
+        spam_score: 0.5,
+        toxicity_score: 0.5,
+        label: 'AI_UNAVAILABLE'
+      };
     }
 
     try {
@@ -66,9 +121,8 @@ class AIService {
 
       const result = await response.json();
 
-      // Success - reset circuit breaker
-      this.circuitBreaker.failures = 0;
-      this.circuitBreaker.state = 'CLOSED';
+      // Success - reset circuit breaker atomically
+      await this.resetCircuitBreaker();
 
       return {
         spam_score: result.spam_score ?? 0.1,
@@ -77,12 +131,8 @@ class AIService {
       };
 
     } catch (error) {
-      this.circuitBreaker.failures++;
-      this.circuitBreaker.lastFailure = Date.now();
-      
-      if (this.circuitBreaker.failures >= this.circuitBreaker.threshold) {
-        this.circuitBreaker.state = 'OPEN';
-      }
+      // Record failure atomically
+      await this.recordFailure();
 
       if (error.name === 'AbortError') {
         logger.warn('[AIService] Request timed out - failing closed');

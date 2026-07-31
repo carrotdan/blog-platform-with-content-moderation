@@ -43,13 +43,15 @@ class PostRepository {
     return Post.findByIdAndDelete(id);
   }
 
-  async findByAuthor(authorId) {
+  async findByAuthor(authorId, skip = 0, limit = 10) {
     return Post.find({ author: authorId })
       .populate('author', 'username avatar')
       .populate({
         path: 'original_post',
         populate: { path: 'author', select: 'username avatar' }
       })
+      .skip(skip)
+      .limit(limit)
       .sort({ createdAt: -1 });
   }
 

@@ -3,8 +3,8 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const { authenticate, authorize } = require('../middlewares/auth.middleware');
 
-// Protect all admin routes
-router.use(authenticate, authorize('ADMIN'));
+// Protect all admin routes - allow both ADMIN and MODERATOR
+router.use(authenticate, authorize(['ADMIN', 'MODERATOR']));
 
 router.get('/violations', adminController.getViolations);
 router.get('/users', adminController.getUsers);

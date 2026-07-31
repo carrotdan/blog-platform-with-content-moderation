@@ -5,6 +5,7 @@ const moderationRepository = require('../repositories/moderation.repo');
 const userRepository = require('../repositories/user.repo');
 const notificationService = require('./notification.service');
 const { getStatusFromScore, getViolationDeltas, isViolationLabel } = require('../utils/violationScore');
+const { randomUUID } = require('crypto');
 
 class PostService {
   async createPost(user_id, data) {
@@ -355,13 +356,13 @@ async updatePost(id, data, user_id) {
     return postRepository.delete(id);
   }
 
-  async getMyPosts(user_id) {
-    const posts = await postRepository.findByAuthor(user_id);
+  async getMyPosts(user_id, skip = 0, limit = 10) {
+    const posts = await postRepository.findByAuthor(user_id, skip, limit);
     return this._enrichPosts(posts, user_id);
   }
 
-  async getPostsByUser(user_id, current_user_id = null) {
-    const posts = await postRepository.findByAuthor(user_id);
+  async getPostsByUser(user_id, current_user_id = null, skip = 0, limit = 10) {
+    const posts = await postRepository.findByAuthor(user_id, skip, limit);
     return this._enrichPosts(posts, current_user_id);
   }
 
@@ -420,9 +421,8 @@ async updatePost(id, data, user_id) {
 
   generateUniqueSlug(baseTitle) {
     const baseSlug = baseTitle.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8);
-    return `${baseSlug}-${timestamp}-${random}`;
+    const uuid = randomUUID().replace(/-/g, '').slice(0, 12);
+    return `${baseSlug}-${uuid}`;
   }
 }
 

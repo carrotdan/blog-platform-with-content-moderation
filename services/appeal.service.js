@@ -12,20 +12,20 @@ class AppealService {
     const { target_id, target_model, reason, ai_label, ai_spam_score, ai_toxicity_score } = data;
 
     if (!target_id || !target_model || !reason) {
-      throw new Error('Thiếu thông tin: target_id, target_model, reason là bắt buộc');
+      throw new Error('Missing required fields: target_id, target_model, reason');
     }
 
     if (!['Post', 'Comment'].includes(target_model)) {
-      throw new Error('target_model không hợp lệ (chỉ Post hoặc Comment)');
+      throw new Error('Invalid target_model (only Post or Comment)');
     }
 
     if (!['SPAM', 'TOXIC', 'AI_UNAVAILABLE'].includes(ai_label)) {
-      throw new Error('ai_label không hợp lệ (chỉ SPAM, TOXIC, AI_UNAVAILABLE)');
+      throw new Error('Invalid ai_label (only SPAM, TOXIC, AI_UNAVAILABLE)');
     }
 
     const existing = await appealRepository.findExisting(user_id, target_id);
     if (existing) {
-      throw new Error('Bạn đã kháng cáo nội dung này và đang chờ xử lý');
+      throw new Error('You have already appealed this content and it is pending review');
     }
 
     const target = target_model === 'Post'
@@ -33,14 +33,14 @@ class AppealService {
       : await commentRepository.findById(target_id);
 
     if (!target) {
-      throw new Error('Nội dung không tồn tại');
+      throw new Error('Content not found');
     }
 
     if (target_model === 'Post' && target.visibility !== 'HIDDEN') {
-      throw new Error('Chỉ có thể kháng cáo bài viết đang bị ẩn');
+      throw new Error('Can only appeal hidden posts');
     }
     if (target_model === 'Comment' && !target.is_hidden) {
-      throw new Error('Chỉ có thể kháng cáo bình luận đang bị ẩn');
+      throw new Error('Can only appeal hidden comments');
     }
 
     const appeal = await appealRepository.create({
@@ -70,8 +70,8 @@ class AppealService {
 
   async approveAppeal(appeal_id, admin_id, admin_note = '') {
     const appeal = await appealRepository.findById(appeal_id);
-    if (!appeal) throw new Error('Kháng cáo không tồn tại');
-    if (appeal.status !== 'PENDING') throw new Error('Kháng cáo này đã được xử lý');
+    if (!appeal) throw new Error('Appeal not found');
+    if (appeal.status !== 'PENDING') throw new Error('This appeal has already been processed');
 
     if (appeal.target_model === 'Post') {
       await postRepository.updateVisibility(appeal.target_id, 'PUBLIC');
@@ -101,7 +101,7 @@ class AppealService {
       metadata: {
         result: 'APPROVED',
         target_model: appeal.target_model,
-        admin_note: admin_note || 'Nội dung của bạn đã được khôi phục.',
+        admin_note: admin_note || 'Your content has been restored.',
         ai_label: appeal.ai_label
       }
     });
@@ -111,8 +111,8 @@ class AppealService {
 
   async rejectAppeal(appeal_id, admin_id, admin_note = '') {
     const appeal = await appealRepository.findById(appeal_id);
-    if (!appeal) throw new Error('Kháng cáo không tồn tại');
-    if (appeal.status !== 'PENDING') throw new Error('Kháng cáo này đã được xử lý');
+    if (!appeal) throw new Error('Appeal not found');
+    if (appeal.status !== 'PENDING') throw new Error('This appeal has already been processed');
 
     const updated = await appealRepository.update(appeal_id, {
       status: 'REJECTED',
@@ -136,7 +136,7 @@ class AppealService {
       metadata: {
         result: 'REJECTED',
         target_model: appeal.target_model,
-        admin_note: admin_note || 'Kháng cáo của bạn đã bị từ chối sau khi xem xét.',
+        admin_note: admin_note || 'Your appeal has been rejected after review.',
         ai_label: appeal.ai_label
       }
     });

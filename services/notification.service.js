@@ -10,12 +10,12 @@ class NotificationService {
       populatedNotif = await notification.populate('sender', 'username avatar');
     }
     
-    let message = 'Bạn có thông báo mới';
-    if (data.type === 'LIKE') message = `${populatedNotif.sender?.username} đã thích bài viết của bạn`;
-    if (data.type === 'COMMENT') message = `${populatedNotif.sender?.username} đã bình luận bài viết của bạn`;
-    if (data.type === 'FOLLOW') message = `${populatedNotif.sender?.username} đã bắt đầu theo dõi bạn`;
-    if (data.type === 'REPOST') message = `${populatedNotif.sender?.username} đã chia sẻ bài viết của bạn`;
-    if (data.type === 'REPLY') message = `${populatedNotif.sender?.username} đã trả lời bình luận của bạn`;
+    let message = 'You have a new notification';
+    if (data.type === 'LIKE') message = `${populatedNotif.sender?.username} liked your post`;
+    if (data.type === 'COMMENT') message = `${populatedNotif.sender?.username} commented on your post`;
+    if (data.type === 'FOLLOW') message = `${populatedNotif.sender?.username} started following you`;
+    if (data.type === 'REPOST') message = `${populatedNotif.sender?.username} reposted your post`;
+    if (data.type === 'REPLY') message = `${populatedNotif.sender?.username} replied to your comment`;
     
     const socketService = require('./socket.service');
     socketService.sendNotification(data.recipient, {
@@ -27,7 +27,7 @@ class NotificationService {
   }
 
   /**
-   * Gửi thông báo hệ thống (không có sender - từ AI/Admin)
+   * Send system notification (no sender - from AI/Admin)
    */
   async sendSystemNotification({ recipient, type, entity_id, entity_model, metadata = {} }) {
     const notifData = {
@@ -41,24 +41,24 @@ class NotificationService {
 
     const notification = await notificationRepository.create(notifData);
 
-    // Tạo message thân thiện
-    let message = 'Bạn có thông báo từ hệ thống';
+    // Create friendly message
+    let message = 'You have a system notification';
 
     if (type === 'AI_MODERATION') {
-      const label = metadata.ai_label || 'vi phạm';
-      const targetType = metadata.target_model === 'Post' ? 'bài viết' : 'bình luận';
+      const label = metadata.ai_label || 'violation';
+      const targetType = metadata.target_model === 'Post' ? 'post' : 'comment';
       if (label === 'SPAM') {
-        message = `⚠️ ${targetType} của bạn bị hệ thống AI phát hiện là SPAM và đã bị ẩn. Bạn có thể gửi kháng cáo nếu cho rằng đây là nhầm lẫn.`;
+        message = `⚠️ Your ${targetType} was flagged as SPAM by AI moderation and has been hidden. You can appeal if you believe this is a mistake.`;
       } else if (label === 'TOXIC') {
-        message = `⚠️ ${targetType} của bạn bị hệ thống AI phát hiện chứa nội dung TOXIC và đã bị ẩn. Bạn có thể gửi kháng cáo nếu cho rằng đây là nhầm lẫn.`;
+        message = `⚠️ Your ${targetType} was flagged as TOXIC by AI moderation and has been hidden. You can appeal if you believe this is a mistake.`;
       }
     }
 
     if (type === 'APPEAL_RESOLVED') {
       if (metadata.result === 'APPROVED') {
-        message = `✅ Kháng cáo của bạn đã được CHẤP NHẬN. Nội dung đã được khôi phục.`;
+        message = `✅ Your appeal has been APPROVED. Content has been restored.`;
       } else {
-        message = `❌ Kháng cáo của bạn đã bị TỪ CHỐI. ${metadata.admin_note || ''}`;
+        message = `❌ Your appeal has been REJECTED. ${metadata.admin_note || ''}`;
       }
     }
 

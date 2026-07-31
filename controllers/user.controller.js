@@ -143,7 +143,11 @@ class UserController {
       const postService = require('../services/post.service');
       const isAuthenticated = !!req.user;
       let isLimited = false;
-      let finalPosts = await postService.getPostsByUser(user._id, req.user?.id);
+      
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 10, 20);
+      
+      let finalPosts = await postService.getPostsByUser(user._id, req.user?.id, skip, limit);
 
       if (!isAuthenticated && finalPosts.length > 3) {
         finalPosts = finalPosts.slice(0, 3);
@@ -169,7 +173,7 @@ class UserController {
             isFollowing: isFollowing
           },
           posts: finalPosts,
-          meta: { isLimited }
+          meta: { isLimited, skip, limit }
         }
       });
     } catch (error) {

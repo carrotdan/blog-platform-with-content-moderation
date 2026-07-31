@@ -8,7 +8,9 @@ module.exports = {
   io: null,
   init: (server) => {
     io = socketIo(server, {
-      cors: { origin: process.env.CLIENT_URL || 'http://localhost:3000' }
+      cors: { origin: process.env.CLIENT_URL || 'http://localhost:3000' },
+      pingInterval: 25000,
+      pingTimeout: 20000
     });
 
     // Auth middleware for socket connections

@@ -19,8 +19,9 @@ class CommentService {
     const is_hidden = isFlagged;
     
     let depth = 0;
+    let parentComment = null;
     if (parent_id) {
-      const parentComment = await commentRepository.findById(parent_id);
+      parentComment = await commentRepository.findById(parent_id);
       if (parentComment) {
         depth = parentComment.depth + 1;
         
@@ -51,7 +52,6 @@ class CommentService {
     
     if (parent_id) {
       // It's a REPLY
-      const parentComment = await commentRepository.findById(parent_id);
       if (parentComment && parentComment.author.toString() !== user_id.toString()) {
         await notificationService.sendNotification({
           recipient: parentComment.author,
