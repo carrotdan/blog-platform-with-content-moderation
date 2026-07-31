@@ -55,7 +55,8 @@ class AuthController {
 
   async refresh(req, res) {
     try {
-      const { refreshToken } = req.body;
+      // H19: Accept the refresh token from the httpOnly cookie or request body
+      const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
       const data = await authService.refreshToken(refreshToken);
       res.status(200).json({
         success: true,

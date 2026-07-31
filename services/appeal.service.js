@@ -4,6 +4,7 @@ const postRepository = require('../repositories/post.repo');
 const commentRepository = require('../repositories/comment.repo');
 const userRepository = require('../repositories/user.repo');
 const notificationService = require('./notification.service');
+const { getStatusFromScore, getDeltasFromLabel, isViolationLabel } = require('../utils/violation');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
 
@@ -84,6 +85,21 @@ class AppealService {
       reviewed_by: admin_id,
       admin_note
     });
+
+    // H29: Reverse the violation penalties that were applied when the content
+    // was originally flagged (SPAM/TOXIC), then recompute the user's status.
+    if (isViolationLabel(appeal.ai_label)) {
+      const { spamDelta, toxicDelta } = getDeltasFromLabel(appeal.ai_label);
+      const userId = appeal.user_id._id || appeal.user_id;
+      const updatedUser = await userRepository.decrementViolations(userId, spamDelta, toxicDelta);
+
+      if (updatedUser) {
+        const status = getStatusFromScore(updatedUser.violationScore, updatedUser.status);
+        if (status !== updatedUser.status) {
+          await userRepository.update(userId, { status });
+        }
+      }
+    }
 
     await moderationRepository.createLog({
       moderator_id: admin_id,

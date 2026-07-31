@@ -11,6 +11,25 @@ class CommentService {
   async createComment(user_id, data) {
     const { post_id, parent_id, content } = data;
     
+    // H26: Validate the target post exists and is commentable BEFORE creating
+    const Post = require('../models/Post');
+    const post = await Post.findById(post_id);
+    if (!post) {
+      const error = new Error('Post not found');
+      error.statusCode = 404;
+      throw error;
+    }
+    if (post.visibility === 'HIDDEN') {
+      const error = new Error('Cannot comment on a hidden post');
+      error.statusCode = 403;
+      throw error;
+    }
+    if (post.visibility === 'PRIVATE' && post.author.toString() !== user_id.toString()) {
+      const error = new Error('Cannot comment on a private post');
+      error.statusCode = 403;
+      throw error;
+    }
+
     // Analyze content with AI
     const aiResult = await aiService.analyze(content);
     const { spam_score, toxicity_score, label } = aiResult;
@@ -23,6 +42,12 @@ class CommentService {
     if (parent_id) {
       parentComment = await commentRepository.findById(parent_id);
       if (parentComment) {
+        // Ensure the reply belongs to the same post
+        if (parentComment.post_id.toString() !== post_id.toString()) {
+          const error = new Error('Parent comment does not belong to this post');
+          error.statusCode = 400;
+          throw error;
+        }
         depth = parentComment.depth + 1;
         
         if (depth >= MAX_COMMENT_DEPTH) {
@@ -48,13 +73,12 @@ class CommentService {
     const newComment = await commentRepository.create(commentData);
 
     // Notification Logic
-    const Post = require('../models/Post');
-    
     if (parent_id) {
       // It's a REPLY
-      if (parentComment && parentComment.author.toString() !== user_id.toString()) {
+      // H27: author is populated here, so compare against _id, not toString()
+      if (parentComment && parentComment.author._id.toString() !== user_id.toString()) {
         await notificationService.sendNotification({
-          recipient: parentComment.author,
+          recipient: parentComment.author._id,
           sender: user_id,
           type: 'REPLY',
           entity_id: newComment._id,
@@ -62,8 +86,7 @@ class CommentService {
         });
       }
     } else {
-      // It's a COMMENT on a Post
-      const post = await Post.findById(post_id);
+      // It's a COMMENT on a Post (post already loaded above)
       if (post && post.author.toString() !== user_id.toString()) {
         await notificationService.sendNotification({
           recipient: post.author,

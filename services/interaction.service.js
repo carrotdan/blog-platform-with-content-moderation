@@ -3,6 +3,14 @@ const notificationService = require('./notification.service');
 
 class InteractionService {
   async interact(user_id, target_id, target_model, type) {
+    // H24: Reposts are real Post documents (POST /posts/:id/repost), not
+    // Interaction rows. Reject the legacy REPOST type so counts stay consistent.
+    if (type === 'REPOST') {
+      const error = new Error('Reposts are handled via POST /posts/:id/repost');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const existing = await interactionRepository.findInteraction(user_id, target_id, type);
     
     if (existing) {

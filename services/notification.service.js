@@ -1,6 +1,12 @@
 const notificationRepository = require('../repositories/notification.repo');
 
 class NotificationService {
+  _httpError(message, statusCode) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+  }
+
   async sendNotification(data) {
     const notification = await notificationRepository.create(data);
     
@@ -76,7 +82,12 @@ class NotificationService {
     return notificationRepository.findByRecipientId(user_id, skip, limit);
   }
 
-  async markAsRead(notification_id) {
+  async markAsRead(notification_id, user_id) {
+    const notification = await notificationRepository.findById(notification_id);
+    if (!notification) throw this._httpError('Notification not found', 404);
+    if (notification.recipient.toString() !== user_id.toString()) {
+      throw this._httpError('Unauthorized', 403);
+    }
     return notificationRepository.markAsRead(notification_id);
   }
 
@@ -84,7 +95,12 @@ class NotificationService {
     return notificationRepository.markAllAsRead(user_id);
   }
 
-  async deleteNotification(notification_id) {
+  async deleteNotification(notification_id, user_id) {
+    const notification = await notificationRepository.findById(notification_id);
+    if (!notification) throw this._httpError('Notification not found', 404);
+    if (notification.recipient.toString() !== user_id.toString()) {
+      throw this._httpError('Unauthorized', 403);
+    }
     return notificationRepository.delete(notification_id);
   }
 }

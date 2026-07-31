@@ -230,6 +230,153 @@ describe('Security headers', () => {
   });
 });
 
+describe('Sprint 10 security fixes', () => {
+  let userAToken;
+  let userBToken;
+  let userBId;
+  let postId;
+  let notificationId;
+
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({
+      email,
+      username,
+      password: hash,
+      role: 'USER'
+    });
+    return doc;
+  };
+
+  beforeAll(async () => {
+    const User = mongoose.model('User');
+
+    // User A = the user created in the Auth flow tests
+    const userA = await User.findOne({ email: 'test@example.com' });
+    userAToken = mintToken(userA._id.toString());
+
+    // User B
+    const userB = await createUser('other@example.com', 'otheruser');
+    userBToken = mintToken(userB._id.toString());
+    userBId = userB._id.toString();
+
+    // User C (non-participant)
+    await createUser('third@example.com', 'thirduser');
+
+    // User A creates a post
+    const postRes = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ content_html: '<p>Sprint 10 test post</p>' });
+    postId = postRes.body.data._id;
+  });
+
+  test('H25: posts are created with status PUBLISHED', async () => {
+    const res = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ content_html: '<p>Published check</p>' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.status).toBe('PUBLISHED');
+  });
+
+  test('H26: comments are rejected on a non-existent post', async () => {
+    const fakeId = '000000000000000000000000';
+    const res = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ post_id: fakeId, content: 'orphan comment' });
+    expect(res.status).toBe(404);
+  });
+
+  test('H26: comments are rejected on a hidden post', async () => {
+    const meA = await request(app)
+      .get('/api/v1/users/me')
+      .set('Authorization', `Bearer ${userAToken}`);
+    const userIdA = meA.body.data.id;
+
+    const Post = mongoose.model('Post');
+    const hidden = await Post.create({
+      author: userIdA,
+      slug: `hidden-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>hidden</p>',
+      visibility: 'HIDDEN',
+      status: 'PUBLISHED'
+    });
+    const res = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${userBToken}`)
+      .send({ post_id: hidden._id.toString(), content: 'leak' });
+    expect(res.status).toBe(403);
+  });
+
+  test('H24: REPOST interaction type is rejected', async () => {
+    const res = await request(app)
+      .post('/api/v1/interactions')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ target_id: postId, target_model: 'Post', type: 'REPOST' });
+    expect(res.status).toBe(400);
+  });
+
+  test('H20: conversation deletion requires participation', async () => {
+    // User A and B start a conversation, A sends a message
+    await request(app)
+      .post('/api/v1/messages/conversations')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ recipientId: userBId });
+
+    const msgRes = await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ recipientId: userBId, content: 'hi' });
+    expect(msgRes.status).toBe(201);
+    const conversationId = msgRes.body.data.conversation_id;
+
+    // Third user is not a participant
+    const User = mongoose.model('User');
+    const userC = await User.findOne({ email: 'third@example.com' });
+    const userCToken = mintToken(userC._id.toString());
+
+    const deleteRes = await request(app)
+      .delete(`/api/v1/messages/${conversationId}`)
+      .set('Authorization', `Bearer ${userCToken}`);
+    expect(deleteRes.status).toBe(403);
+  });
+
+  test('H21: a user cannot mark another users notification as read', async () => {
+    // User A follows user B so B receives a FOLLOW notification
+    await request(app)
+      .post('/api/v1/follows')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ following_id: userBId });
+
+    const notifList = await request(app)
+      .get('/api/v1/notifications')
+      .set('Authorization', `Bearer ${userBToken}`);
+    expect(notifList.status).toBe(200);
+    expect(notifList.body.data.length).toBeGreaterThan(0);
+    notificationId = notifList.body.data[0]._id;
+
+    // User A (not the recipient) must not mark it read
+    const res = await request(app)
+      .patch(`/api/v1/notifications/${notificationId}/read`)
+      .set('Authorization', `Bearer ${userAToken}`);
+    expect(res.status).toBe(403);
+  });
+});
+
 describe('Rate limiting', () => {
   test('auth endpoints are rate limited', async () => {
     const attempts = [];
@@ -245,3 +392,4 @@ describe('Rate limiting', () => {
     expect(limited).toBeDefined();
   });
 });
+

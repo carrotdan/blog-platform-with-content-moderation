@@ -38,6 +38,20 @@ class UserRepository {
       { new: true }
     ).select('-password');
   }
+
+  async decrementViolations(userId, spamDelta = 0, toxicDelta = 0) {
+    return User.findByIdAndUpdate(
+      userId,
+      {
+        $inc: {
+          spamCount: -spamDelta,
+          toxicCount: -toxicDelta,
+          violationScore: -(spamDelta * 1 + toxicDelta * 3)
+        }
+      },
+      { new: true }
+    ).select('-password');
+  }
 }
 
 module.exports = new UserRepository();

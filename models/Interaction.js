@@ -5,7 +5,7 @@ const interactionSchema = new mongoose.Schema(
     user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     target_id: { type: mongoose.Schema.Types.ObjectId, required: true },
     target_model: { type: String, enum: ['Post', 'Comment'], required: true },
-    type: { type: String, enum: ['LIKE', 'BOOKMARK', 'REPOST'], required: true }
+    type: { type: String, enum: ['LIKE', 'BOOKMARK'], required: true }
   },
   { timestamps: true }
 );

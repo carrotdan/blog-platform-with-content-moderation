@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const reportController = require('../controllers/report.controller');
-const { authenticate, authorize } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
 const { idParamSchema } = require('../validators/schemas');
 
@@ -14,7 +14,7 @@ const contentCreateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-router.post('/', authenticate, contentCreateLimiter, reportController.createReport);
+router.post('/', authenticate, checkStatus, contentCreateLimiter, reportController.createReport);
 
 // Admin routes
 router.get('/', authenticate, authorize(['ADMIN']), reportController.listReports);

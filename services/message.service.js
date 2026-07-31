@@ -31,18 +31,32 @@ class MessageService {
   async getMessages(conversationId, userId) {
     // Check if user is part of conversation
     const conversation = await conversationRepo.findById(conversationId);
-    if (!conversation) throw new Error('Conversation not found');
+    if (!conversation) throw this._httpError('Conversation not found', 404);
     
     const isParticipant = conversation.participants.some(p => p._id.toString() === userId.toString());
-    if (!isParticipant) throw new Error('Unauthorized');
+    if (!isParticipant) throw this._httpError('Unauthorized', 403);
 
     await messageRepo.markAsRead(conversationId, userId);
     return messageRepo.findByConversation(conversationId);
   }
 
-  async deleteConversation(conversationId) {
+  _httpError(message, statusCode) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+  }
+
+  async _assertParticipant(conversation, userId) {
+    if (!conversation) throw this._httpError('Conversation not found', 404);
+    const isParticipant = conversation.participants.some(p => p._id.toString() === userId.toString());
+    if (!isParticipant) throw this._httpError('Unauthorized', 403);
+  }
+
+  async deleteConversation(conversationId, userId) {
     const Message = require('../models/Message');
     const Conversation = require('../models/Conversation');
+    const conversation = await conversationRepo.findById(conversationId);
+    await this._assertParticipant(conversation, userId);
     await Message.deleteMany({ conversation_id: conversationId });
     await Conversation.findByIdAndDelete(conversationId);
     return true;
@@ -51,7 +65,10 @@ class MessageService {
   async reactToMessage(messageId, userId, emoji) {
     const Message = require('../models/Message');
     const message = await Message.findById(messageId);
-    if (!message) throw new Error('Message not found');
+    if (!message) throw this._httpError('Message not found', 404);
+
+    const conversation = await conversationRepo.findById(message.conversation_id);
+    await this._assertParticipant(conversation, userId);
 
     const existingReactionIndex = message.reactions.findIndex(r => r.user_id.toString() === userId.toString());
     

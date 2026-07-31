@@ -32,10 +32,23 @@ class PostController {
         uploadedMedia = await Promise.all(uploadPromises);
       }
 
+      let parsedContentJson = { text: req.body.content || '' };
+      if (content_json) {
+        if (typeof content_json === 'object') {
+          parsedContentJson = content_json;
+        } else {
+          try {
+            parsedContentJson = JSON.parse(content_json);
+          } catch (err) {
+            return res.status(400).json({ success: false, message: 'content_json must be valid JSON' });
+          }
+        }
+      }
+
       const postData = {
         title: title || 'No Title', // Fallback
         content_html: sanitizedHtml,
-        content_json: content_json ? JSON.parse(content_json) : { text: req.body.content || '' },
+        content_json: parsedContentJson,
         tags: Array.isArray(tags) ? tags : (typeof tags === 'string' && tags ? tags.split(',') : []),
         visibility: visibility || 'PUBLIC',
         media: uploadedMedia
@@ -98,7 +111,7 @@ class PostController {
   async listPosts(req, res, next) {
     try {
       let { skip, limit, tag } = req.query;
-      const query = { visibility: 'PUBLIC' };
+      const query = { visibility: 'PUBLIC', status: 'PUBLISHED' };
       
       const isAuthenticated = !!req.user;
       let isLimited = false;

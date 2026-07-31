@@ -18,7 +18,7 @@ class NotificationController {
 
   async markAsRead(req, res, next) {
     try {
-      const notification = await notificationService.markAsRead(req.params.id);
+      const notification = await notificationService.markAsRead(req.params.id, req.user.id);
       res.status(200).json({
         success: true,
         message: 'Notification marked as read',
@@ -44,7 +44,7 @@ class NotificationController {
 
   async delete(req, res, next) {
     try {
-      await notificationService.deleteNotification(req.params.id);
+      await notificationService.deleteNotification(req.params.id, req.user.id);
       res.status(200).json({
         success: true,
         message: 'Notification deleted successfully',

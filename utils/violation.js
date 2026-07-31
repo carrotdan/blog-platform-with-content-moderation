@@ -14,11 +14,13 @@ function calculateViolationScore(spamCount, toxicCount) {
 
 function getStatusFromScore(violationScore, currentStatus = 'ACTIVE') {
   if (currentStatus === 'BANNED') return 'BANNED';
-  
+
   if (violationScore >= STATUS_THRESHOLDS.BANNED) return 'BANNED';
   if (violationScore >= STATUS_THRESHOLDS.WARNING) return 'WARNING';
-  
-  return 'ACTIVE';
+
+  // H28: Preserve the current status (e.g. MUTED/WARNING) below the warning
+  // threshold so admin-set statuses are not silently undone.
+  return currentStatus;
 }
 
 function getDeltasFromLabel(label) {
@@ -26,6 +28,12 @@ function getDeltasFromLabel(label) {
     spamDelta: label === 'SPAM' ? 1 : 0,
     toxicDelta: label === 'TOXIC' ? 1 : 0
   };
+}
+
+const getViolationDeltas = getDeltasFromLabel;
+
+function getScoreIncrement(label) {
+  return VIOLATION_WEIGHTS[label] || 0;
 }
 
 function isViolationLabel(label) {
@@ -38,5 +46,7 @@ module.exports = {
   calculateViolationScore,
   getStatusFromScore,
   getDeltasFromLabel,
+  getViolationDeltas,
+  getScoreIncrement,
   isViolationLabel
 };

@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
-const { authenticate, authorize } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
 const { idParamSchema } = require('../validators/schemas');
 
-// Protect all admin routes - allow both ADMIN and MODERATOR
-router.use(authenticate, authorize(['ADMIN', 'MODERATOR']));
+// Protect all admin routes - allow both ADMIN and MODERATOR, but never banned/muted accounts
+router.use(authenticate, checkStatus, authorize(['ADMIN', 'MODERATOR']));
 
 router.get('/violations', adminController.getViolations);
 router.get('/users', adminController.getUsers);

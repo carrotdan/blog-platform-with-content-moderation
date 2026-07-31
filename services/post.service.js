@@ -4,7 +4,7 @@ const Post = require('../models/Post');
 const moderationRepository = require('../repositories/moderation.repo');
 const userRepository = require('../repositories/user.repo');
 const notificationService = require('./notification.service');
-const { getStatusFromScore, getViolationDeltas, isViolationLabel } = require('../utils/violationScore');
+const { getStatusFromScore, getViolationDeltas, isViolationLabel } = require('../utils/violation');
 const { randomUUID } = require('crypto');
 
 class PostService {
@@ -33,6 +33,8 @@ class PostService {
       tags: data.tags || [],
       reading_time: readingTime,
       is_sensitive: false,
+      // H25: Posts are created published (DRAFT state machine is not exposed via API)
+      status: 'PUBLISHED',
       // Hide completely if AI flags as SPAM, TOXIC, or AI_UNAVAILABLE — wait for admin review
       visibility: isFlagged ? 'HIDDEN' : (data.visibility || 'PUBLIC')
     };

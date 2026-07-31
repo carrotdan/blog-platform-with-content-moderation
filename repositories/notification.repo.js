@@ -6,6 +6,10 @@ class NotificationRepository {
     return Notification.create(notificationData);
   }
 
+  async findById(id) {
+    return Notification.findById(id);
+  }
+
   async findByRecipientId(recipient, skip = 0, limit = 20) {
     return Notification.find({ recipient })
       .populate(getSenderPopulate())

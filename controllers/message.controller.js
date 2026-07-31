@@ -80,7 +80,7 @@ class MessageController {
   async deleteConversation(req, res, next) {
     try {
       const { conversationId } = req.params;
-      await messageService.deleteConversation(conversationId);
+      await messageService.deleteConversation(conversationId, req.user.id);
       res.status(200).json({ success: true, message: 'Conversation deleted successfully' });
     } catch (error) {
       next(error);

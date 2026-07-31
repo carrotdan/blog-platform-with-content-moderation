@@ -8,6 +8,6 @@ const { userIdParamSchema } = require('../validators/schemas');
 router.post('/', authenticate, checkStatus, followController.toggleFollow);
 router.get('/:userId/followers', validate(userIdParamSchema), followController.getFollowers);
 router.get('/:userId/following', validate(userIdParamSchema), followController.getFollowing);
-router.get('/suggestions', authenticate, followController.getSuggestions);
+router.get('/suggestions', authenticate, checkStatus, followController.getSuggestions);
 
 module.exports = router;
