@@ -1,4 +1,5 @@
 const Comment = require('../models/Comment');
+const { getAuthorPopulate } = require('../utils/populate');
 
 class CommentRepository {
   async create(commentData) {
@@ -6,12 +7,12 @@ class CommentRepository {
   }
 
   async findById(id) {
-    return Comment.findById(id).populate('author', 'username avatar');
+    return Comment.findById(id).populate(getAuthorPopulate());
   }
 
   async findByPostId(post_id, skip = 0, limit = 20) {
     return Comment.find({ post_id, is_hidden: false })
-      .populate('author', 'username avatar')
+      .populate(getAuthorPopulate())
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: 1 });
@@ -26,12 +27,12 @@ class CommentRepository {
   }
 
   async findByIdAdmin(id) {
-    return Comment.findById(id).populate('author', 'username email avatar');
+    return Comment.findById(id).populate(getAuthorPopulate(true));
   }
 
   async findAllAdmin(query = {}, skip = 0, limit = 20) {
     return Comment.find(query)
-      .populate('author', 'username email avatar')
+      .populate(getAuthorPopulate(true))
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });

@@ -1,4 +1,5 @@
 const Post = require('../models/Post');
+const { getAuthorPopulate, getOriginalPostPopulate } = require('../utils/populate');
 
 class PostRepository {
   async create(postData) {
@@ -7,20 +8,14 @@ class PostRepository {
 
   async findById(id) {
     return Post.findById(id)
-      .populate('author', 'username avatar')
-      .populate({
-        path: 'original_post',
-        populate: { path: 'author', select: 'username avatar' }
-      });
+      .populate(getAuthorPopulate())
+      .populate(getOriginalPostPopulate());
   }
 
   async findBySlug(slug) {
     return Post.findOne({ slug })
-      .populate('author', 'username avatar')
-      .populate({
-        path: 'original_post',
-        populate: { path: 'author', select: 'username avatar' }
-      });
+      .populate(getAuthorPopulate())
+      .populate(getOriginalPostPopulate());
   }
 
   async update(id, updateData) {
@@ -29,11 +24,8 @@ class PostRepository {
 
   async findAll(query = {}, skip = 0, limit = 10) {
     return Post.find(query)
-      .populate('author', 'username avatar')
-      .populate({
-        path: 'original_post',
-        populate: { path: 'author', select: 'username avatar' }
-      })
+      .populate(getAuthorPopulate())
+      .populate(getOriginalPostPopulate())
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });
@@ -45,11 +37,8 @@ class PostRepository {
 
   async findByAuthor(authorId, skip = 0, limit = 10) {
     return Post.find({ author: authorId })
-      .populate('author', 'username avatar')
-      .populate({
-        path: 'original_post',
-        populate: { path: 'author', select: 'username avatar' }
-      })
+      .populate(getAuthorPopulate())
+      .populate(getOriginalPostPopulate())
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });
@@ -80,14 +69,14 @@ class PostRepository {
 
   async findAdminAll(skip = 0, limit = 20) {
     return Post.find()
-      .populate('author', 'username email avatar')
+      .populate(getAuthorPopulate(true))
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });
   }
 
   async findByIdAdmin(id) {
-    return Post.findById(id).populate('author', 'username email avatar');
+    return Post.findById(id).populate(getAuthorPopulate(true));
   }
 }
 

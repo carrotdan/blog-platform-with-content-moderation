@@ -1,4 +1,5 @@
 const Follow = require('../models/Follow');
+const { BASE_FOLLOW_POPULATE, BASE_FOLLOWING_POPULATE } = require('../utils/populate');
 
 class FollowRepository {
   async create(followData) {
@@ -14,11 +15,11 @@ class FollowRepository {
   }
 
   async getFollowers(userId) {
-    return Follow.find({ following_id: userId }).populate('follower_id', 'username avatar bio');
+    return Follow.find({ following_id: userId }).populate(BASE_FOLLOW_POPULATE);
   }
 
   async getFollowing(userId) {
-    return Follow.find({ follower_id: userId }).populate('following_id', 'username avatar bio');
+    return Follow.find({ follower_id: userId }).populate(BASE_FOLLOWING_POPULATE);
   }
 
   async getFollowersCount(userId) {

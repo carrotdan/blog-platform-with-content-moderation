@@ -10,6 +10,8 @@ const morgan = require('morgan');
 
 const { errorMiddleware } = require('./middlewares/error.middleware');
 const routes = require('./routes');
+const { swaggerUi, specs } = require('./config/swagger');
+const { requestIdMiddleware, addRequestIdToLogger, errorLoggerMiddleware } = require('./middlewares/request-id.middleware');
 
 const app = express();
 
@@ -22,8 +24,18 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(morgan('dev'));
 
+// Request ID & Tracing
+app.use(requestIdMiddleware);
+app.use(addRequestIdToLogger);
+
 // Serve static files from uploads folder
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Swagger API Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Blog Platform API Documentation'
+}));
 
 // Routes
 app.use('/api', routes);
@@ -94,7 +106,13 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('unhandledRejection');
 });
 
-mongoose.connect(MONGODB_URI)
+mongoose.connect(MONGODB_URI, {
+  maxPoolSize: 10,
+  minPoolSize: 2,
+  socketTimeoutMS: 45000,
+  serverSelectionTimeoutMS: 5000,
+  family: 4
+})
   .then(() => {
     console.log('Connected to MongoDB');
     server.listen(PORT, () => {

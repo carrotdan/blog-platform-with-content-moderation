@@ -1,4 +1,5 @@
 const Notification = require('../models/Notification');
+const { getSenderPopulate } = require('../utils/populate');
 
 class NotificationRepository {
   async create(notificationData) {
@@ -7,7 +8,7 @@ class NotificationRepository {
 
   async findByRecipientId(recipient, skip = 0, limit = 20) {
     return Notification.find({ recipient })
-      .populate('sender', 'username avatar')
+      .populate(getSenderPopulate())
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });

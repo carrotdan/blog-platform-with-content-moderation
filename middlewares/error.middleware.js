@@ -1,3 +1,5 @@
+const { errorLoggerMiddleware } = require('./request-id.middleware');
+
 const errorMiddleware = (err, req, res, next) => {
   // Default to 500 for unhandled errors, use error's statusCode if available
   let statusCode = err.statusCode || err.status || 500;
@@ -24,8 +26,12 @@ const errorMiddleware = (err, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     message,
+    requestId: req.requestId,
     data: process.env.NODE_ENV === 'production' ? null : err.stack
   });
 };
 
-module.exports = { errorMiddleware };
+// Log errors before sending response
+const errorHandlerWithLogging = [errorLoggerMiddleware, errorMiddleware];
+
+module.exports = { errorMiddleware: errorHandlerWithLogging };

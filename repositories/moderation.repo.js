@@ -4,6 +4,7 @@ const ModerationLog = require('../models/ModerationLog');
 const Report = require('../models/Report');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
+const { getAuthorPopulate } = require('../utils/populate');
 
 class ModerationRepository {
   async addToQueue(queueData) {
@@ -20,9 +21,9 @@ class ModerationRepository {
     // Manually populate polymorphic target_id based on target_model
     for (const item of items) {
       if (item.target_model === 'Post') {
-        item.target_id = await Post.findById(item.target_id).populate('author', 'username avatar');
+        item.target_id = await Post.findById(item.target_id).populate(getAuthorPopulate());
       } else if (item.target_model === 'Comment') {
-        item.target_id = await Comment.findById(item.target_id).populate('author', 'username avatar');
+        item.target_id = await Comment.findById(item.target_id).populate(getAuthorPopulate());
       }
     }
     
@@ -38,9 +39,9 @@ class ModerationRepository {
     if (!item) return null;
     
     if (item.target_model === 'Post') {
-      item.target_id = await Post.findById(item.target_id).populate('author', 'username avatar');
+      item.target_id = await Post.findById(item.target_id).populate(getAuthorPopulate());
     } else if (item.target_model === 'Comment') {
-      item.target_id = await Comment.findById(item.target_id).populate('author', 'username avatar');
+      item.target_id = await Comment.findById(item.target_id).populate(getAuthorPopulate());
     }
     
     return item;

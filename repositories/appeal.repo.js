@@ -1,4 +1,5 @@
 const Appeal = require('../models/Appeal');
+const { getUserPopulate } = require('../utils/populate');
 
 class AppealRepository {
   async create(data) {
@@ -7,7 +8,7 @@ class AppealRepository {
 
   async findById(id) {
     return Appeal.findById(id)
-      .populate('user_id', 'username email avatar')
+      .populate(getUserPopulate())
       .populate('target_id')
       .populate('reviewed_by', 'username');
   }
@@ -25,14 +26,14 @@ class AppealRepository {
 
   async getPending() {
     return Appeal.find({ status: 'PENDING' })
-      .populate('user_id', 'username email avatar')
+      .populate(getUserPopulate())
       .populate('target_id')
       .sort({ createdAt: -1 });
   }
 
   async getAll() {
     return Appeal.find()
-      .populate('user_id', 'username email avatar')
+      .populate(getUserPopulate())
       .populate('target_id')
       .populate('reviewed_by', 'username email')
       .sort({ createdAt: -1 });
