@@ -17,7 +17,10 @@ const contentCreateLimiter = rateLimit({
 // H36: optionalAuthenticate so a post's author can view comments on their own
 // PRIVATE post; guests/others only see comments under PUBLIC posts.
 router.get('/post/:postId', optionalAuthenticate, validate(paginationSchema), validate(postIdParamSchema), commentController.getComments);
-router.get('/:id', authenticate, validate(getPostSchema), commentController.getCommentById);
+// H42: optionalAuthenticate for the same reason — a single comment's parent-post
+// visibility is enforced in the service (author of a PRIVATE/HIDDEN post may
+// read its comments, everyone else needs PUBLIC).
+router.get('/:id', optionalAuthenticate, validate(getPostSchema), commentController.getCommentById);
 router.post('/', authenticate, checkStatus, contentCreateLimiter, validate(createCommentSchema), commentController.createComment);
 
 module.exports = router;

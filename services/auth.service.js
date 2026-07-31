@@ -151,42 +151,27 @@ class AuthService {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-      
-      // Verify user still exists and not deleted
-      const user = await User.findById(decoded.userId).select('+refreshTokens');
-      if (!user || user.isDeleted) {
+      const tokenHash = this.hashToken(token);
+
+      // H43: Load the user for status/deleted checks (not for the rotation
+      // itself — that must be atomic, see below).
+      const existing = await User.findById(decoded.userId).select('+refreshTokens');
+      if (!existing || existing.isDeleted) {
         throw new Error('User not found or deleted');
       }
 
       // Check user status
-      if (user.status === 'BANNED') {
+      if (existing.status === 'BANNED') {
         throw new Error('Account has been banned');
       }
-      if (user.status === 'MUTED') {
+      if (existing.status === 'MUTED') {
         throw new Error('Account is muted');
       }
 
-      // Clean expired tokens
-      this.cleanExpiredTokens(user);
-
-      // Find and remove the used refresh token
-      const tokenHash = this.hashToken(token);
-      const tokenIndex = user.refreshTokens.findIndex(rt => rt.tokenHash === tokenHash);
-      
-      if (tokenIndex === -1) {
-        // Token not found - possible reuse attack, revoke all tokens
-        user.refreshTokens = [];
-        await user.save();
-        throw new Error('Invalid or expired refresh token');
-      }
-
-      // Remove the used token (rotation)
-      user.refreshTokens.splice(tokenIndex, 1);
-
       // Generate new tokens
       const payload = {
-        userId: user._id.toString(),
-        role: user.role,
+        userId: existing._id.toString(),
+        role: existing.role,
         jti: crypto.randomUUID()
       };
 
@@ -198,17 +183,37 @@ class AuthService {
         expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d'
       });
 
-      // Store new refresh token hash
       const newTokenHash = this.hashToken(newRefreshToken);
       // M34: derive lifetime from JWT_REFRESH_EXPIRE (was hardcoded to 7 days)
       const expiresAt = this.refreshTokenExpiresAt();
-      user.refreshTokens.push({ tokenHash: newTokenHash, expiresAt });
-      // M26: Cap the stored list to the most recent 5 sessions.
-      if (user.refreshTokens.length > 5) {
-        user.refreshTokens = user.refreshTokens.slice(-5);
+
+      // H43: Rotate atomically — the conditional $pull keyed on the old token
+      // hash is the gate. Two concurrent refreshes with the same (unexpired)
+      // token can no longer both pass the "still valid" check: only the first
+      // findOneAndUpdate matches and pulls the old hash; the second finds no
+      // matching token and is treated as reuse → all tokens revoked.
+      // (MongoDB forbids $pull + $push on the same array in one update, so the
+      // old token is claimed atomically here, then the new one is appended.)
+      const claimed = await User.findOneAndUpdate(
+        {
+          _id: decoded.userId,
+          'refreshTokens.tokenHash': tokenHash
+        },
+        { $pull: { refreshTokens: { tokenHash } } },
+        { new: true }
+      ).select('+refreshTokens');
+
+      if (!claimed) {
+        // Token not matched — reuse attack or concurrent race loser. Revoke all.
+        await User.updateOne({ _id: decoded.userId }, { $set: { refreshTokens: [] } });
+        throw new Error('Invalid or expired refresh token');
       }
 
-      await user.save();
+      claimed.refreshTokens.push({ tokenHash: newTokenHash, expiresAt });
+      if (claimed.refreshTokens.length > 5) {
+        claimed.refreshTokens = claimed.refreshTokens.slice(-5);
+      }
+      await claimed.save();
 
       return { accessToken, refreshToken: newRefreshToken };
     } catch (error) {

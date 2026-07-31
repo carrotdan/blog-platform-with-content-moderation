@@ -111,33 +111,16 @@ class AdminController {
 
   async resolveReport(req, res, next) {
     try {
+      // H48: delegate to the unified reportService resolver (single resolve
+      // path) instead of duplicating divergent hide/mark logic here.
       const { action } = req.body; // 'HIDE' or 'DISMISS' or 'MARK_SENSITIVE'
-      
-      const report = await moderationRepository.findReportById(req.params.id);
-      if (!report) return res.status(404).json({ success: false, message: 'Report not found' });
+      const reportService = require('../services/report.service');
+      const report = await reportService.resolveReport(req.params.id, action);
 
-      if (action === 'HIDE') {
-        if (report.target_model === 'Post') {
-          await postRepository.updateVisibility(report.target_id, 'HIDDEN');
-        } else if (report.target_model === 'Comment') {
-          // M7: Hide comment instead of delete
-          await commentRepository.updateHidden(report.target_id, true);
-        }
-      } else if (action === 'MARK_SENSITIVE') {
-        if (report.target_model === 'Post') {
-          await postRepository.update(report.target_id, { is_sensitive: true });
-        } else if (report.target_model === 'Comment') {
-          await commentRepository.updateSensitive(report.target_id, true);
-        }
-      }
-
-      report.status = 'RESOLVED';
-      await report.save();
-
-      res.status(200).json({ 
-        success: true, 
-        message: action === 'HIDE' ? 'Content hidden and report resolved' : 'Report resolved', 
-        data: report 
+      res.status(200).json({
+        success: true,
+        message: action === 'HIDE' ? 'Content hidden and report resolved' : 'Report resolved',
+        data: report
       });
     } catch (error) {
       next(error);

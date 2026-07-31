@@ -1454,3 +1454,165 @@ describe('Sprint 16 fixes (C26-C27)', () => {
   });
 });
 
+describe('Sprint 17 fixes (H42-H49)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  test('H42: GET /comments/:id enforces parent-post visibility', async () => {
+    const owner = await createUser('h42owner@example.com', 'h42owner');
+    const other = await createUser('h42other@example.com', 'h42other');
+    const ownerToken = mintToken(owner._id.toString());
+    const otherToken = mintToken(other._id.toString());
+    const Post = mongoose.model('Post');
+    const Comment = mongoose.model('Comment');
+
+    const privatePost = await Post.create({
+      author: owner._id,
+      slug: `h42-priv-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>private</p>',
+      visibility: 'PRIVATE',
+      status: 'PUBLISHED'
+    });
+    const comment = await Comment.create({
+      post_id: privatePost._id,
+      author: owner._id,
+      content: 'private comment',
+      is_hidden: false
+    });
+    const commentId = comment._id.toString();
+
+    // Other authenticated user (not the author) → 404
+    const otherRes = await request(app)
+      .get(`/api/v1/comments/${commentId}`)
+      .set('Authorization', `Bearer ${otherToken}`);
+    expect(otherRes.status).toBe(404);
+
+    // Guest → 404
+    const guestRes = await request(app).get(`/api/v1/comments/${commentId}`);
+    expect(guestRes.status).toBe(404);
+
+    // Author of the private post → 200
+    const ownerRes = await request(app)
+      .get(`/api/v1/comments/${commentId}`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(ownerRes.status).toBe(200);
+  });
+
+  test('H43: reusing a rotated refresh token revokes the family', async () => {
+    // Exercised at the service level: the HTTP auth routes share a 10/15min
+    // rate limiter across the whole suite. The atomic rotation lives in
+    // authService.refreshToken, which is what H43 fixes.
+    await createUser('h43race@example.com', 'h43race');
+    const authService = require('../../services/auth.service');
+    const { refreshToken: rt } = await authService.login('h43race@example.com', 'password123');
+
+    // First refresh rotates the token
+    const r1 = await authService.refreshToken(rt);
+    expect(r1.refreshToken).not.toBe(rt);
+
+    // Reusing the OLD token must now be rejected (reuse detection)
+    await expect(authService.refreshToken(rt)).rejects.toThrow('Invalid or expired refresh token');
+
+    // And the family is revoked: even the freshly-rotated token is dead
+    await expect(authService.refreshToken(r1.refreshToken)).rejects.toThrow('Invalid or expired refresh token');
+  });
+
+  test('H46: reply to a non-existent parent returns 404 (no orphan comment)', async () => {
+    const author = await createUser('h46author@example.com', 'h46author');
+    const token = mintToken(author._id.toString());
+    const Post = mongoose.model('Post');
+    const post = await Post.create({
+      author: author._id,
+      slug: `h46-post-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>x</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+
+    const res = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ post_id: post._id.toString(), parent_id: '000000000000000000000000', content: 'orphan reply' });
+    expect(res.status).toBe(404);
+
+    // No top-level comment may have been created either
+    const Comment = mongoose.model('Comment');
+    const count = await Comment.countDocuments({ post_id: post._id });
+    expect(count).toBe(0);
+  });
+
+  test('H48: resolving a report with an invalid status is rejected (400)', async () => {
+    const admin = await createUser('h48admin@example.com', 'h48admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'ADMIN' });
+    const adminToken = mintToken(admin._id.toString(), 'ADMIN');
+
+    const reporter = await createUser('h48rep@example.com', 'h48rep');
+    const reporterToken = mintToken(reporter._id.toString());
+    const Post = mongoose.model('Post');
+    const post = await Post.create({
+      author: admin._id,
+      slug: `h48-post-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>x</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+
+    const reportRes = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${reporterToken}`)
+      .send({ target_id: post._id.toString(), target_model: 'Post', reason: 'spam' });
+    expect(reportRes.status).toBe(201);
+    const reportId = reportRes.body.data._id;
+
+    // Unknown status → 400 (previously any string was accepted)
+    const badRes = await request(app)
+      .put(`/api/v1/reports/${reportId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'DELETE_EVERYTHING' });
+    expect(badRes.status).toBe(400);
+
+    // Valid DISMISSED → 200
+    const okRes = await request(app)
+      .put(`/api/v1/reports/${reportId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'DISMISSED' });
+    expect(okRes.status).toBe(200);
+    expect(okRes.body.data.status).toBe('DISMISSED');
+  });
+
+  test('H47: editing a flagged post does not double-count violations', async () => {
+    const author = await createUser('h47author@example.com', 'h47author');
+    const aiService = require('../../services/ai.service');
+    const postService = require('../../services/post.service');
+
+    // Create as SPAM → +1 spam violation
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    const created = await postService.createPost(author._id, { content_html: '<p>spam 1</p>', content_json: {} });
+
+    // Edit, still SPAM → must NOT increment again (label unchanged)
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.95, toxicity_score: 0.1, label: 'SPAM' });
+    await postService.updatePost(created._id, { content_html: '<p>spam 2</p>' }, author._id);
+
+    const User = mongoose.model('User');
+    const fresh = await User.findById(author._id);
+    expect(fresh.spamCount).toBe(1);
+  });
+});
+

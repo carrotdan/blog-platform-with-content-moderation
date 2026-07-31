@@ -336,7 +336,7 @@ async updatePost(id, data, user_id) {
           reporter_id: null
         });
 
-        if (isViolationLabel(label)) {
+        if (isViolationLabel(label) && label !== post.label) {
           const userRepository = require('../repositories/user.repo');
           const notificationService = require('./notification.service');
           

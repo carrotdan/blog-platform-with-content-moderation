@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const reportController = require('../controllers/report.controller');
 const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
-const { idParamSchema, reportSchema } = require('../validators/schemas');
+const { reportSchema, resolveReportSchema } = require('../validators/schemas');
 
 const contentCreateLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -17,7 +17,8 @@ const contentCreateLimiter = rateLimit({
 router.post('/', authenticate, checkStatus, contentCreateLimiter, validate(reportSchema), reportController.createReport);
 
 // Admin routes (H35: banned/muted admins must not list/resolve reports)
+// H48: the resolve body/status is validated against ['RESOLVED','DISMISSED'].
 router.get('/', authenticate, checkStatus, authorize(['ADMIN']), reportController.listReports);
-router.put('/:id', authenticate, checkStatus, authorize(['ADMIN']), validate(idParamSchema), reportController.resolveReport);
+router.put('/:id', authenticate, checkStatus, authorize(['ADMIN']), validate(resolveReportSchema), reportController.resolveReport);
 
 module.exports = router;

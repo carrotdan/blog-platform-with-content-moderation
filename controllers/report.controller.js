@@ -26,8 +26,11 @@ class ReportController {
 
   async resolveReport(req, res, next) {
     try {
+      // H48: map the status-only API body onto the unified action-based resolver.
+      // RESOLVED → HIDE (content hidden + resolved); DISMISSED → DISMISS.
       const { status } = req.body;
-      const report = await reportService.resolveReport(req.params.id, status);
+      const action = status === 'DISMISSED' ? 'DISMISS' : 'HIDE';
+      const report = await reportService.resolveReport(req.params.id, action);
       res.status(200).json({ success: true, message: 'Report updated', data: report });
     } catch (error) {
       next(error);

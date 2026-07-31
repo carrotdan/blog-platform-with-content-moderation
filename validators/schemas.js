@@ -136,6 +136,29 @@ const reportSchema = z.object({
   })
 });
 
+// H48: report resolution status must be a known value (was unvalidated, so any
+// arbitrary string could be written to the Report.status enum and diverge from
+// the admin resolve path).
+const resolveReportSchema = z.object({
+  body: z.object({
+    status: z.enum(['RESOLVED', 'DISMISSED'])
+  }),
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid report ID')
+  })
+});
+
+// H48: the admin resolve action is also validated (was unvalidated — unknown
+// actions silently did nothing but still marked the report RESOLVED).
+const adminResolveReportSchema = z.object({
+  body: z.object({
+    action: z.enum(['HIDE', 'DISMISS', 'MARK_SENSITIVE'])
+  }),
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid report ID')
+  })
+});
+
 const appealSchema = z.object({
   body: z.object({
     target_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid target ID'),
@@ -229,6 +252,8 @@ module.exports = {
   bookmarkSchema,
   followSchema,
   reportSchema,
+  resolveReportSchema,
+  adminResolveReportSchema,
   appealSchema,
   approveAppealSchema,
   rejectAppealSchema,

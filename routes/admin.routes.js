@@ -3,7 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
-const { idParamSchema, paginationSchema } = require('../validators/schemas');
+const { idParamSchema, paginationSchema, adminResolveReportSchema } = require('../validators/schemas');
 
 // Protect all admin routes - allow both ADMIN and MODERATOR, but never banned/muted accounts
 router.use(authenticate, checkStatus, authorize(['ADMIN', 'MODERATOR']));
@@ -22,7 +22,7 @@ router.put('/posts/:id/unmark-sensitive', validate(idParamSchema), adminControll
 router.delete('/posts/:id', validate(idParamSchema), adminController.deletePost);
 
 router.get('/reports', adminController.getReports);
-router.put('/reports/:id/resolve', validate(idParamSchema), adminController.resolveReport);
+router.put('/reports/:id/resolve', validate(adminResolveReportSchema), adminController.resolveReport);
 
 router.put('/users/:id/mute', authorize('ADMIN'), validate(idParamSchema), adminController.muteUser);
 router.put('/users/:id/ban', authorize('ADMIN'), validate(idParamSchema), adminController.banUser);

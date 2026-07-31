@@ -52,8 +52,45 @@ class ReportService {
     return reportRepository.findAll(query);
   }
 
-  async resolveReport(id, status) {
-    return reportRepository.updateStatus(id, status);
+  // H48: single, consistent resolution path. The legacy report.controller
+  // resolve (status-only) and admin.controller resolve (action-based) diverged:
+  // one wrote arbitrary statuses, the other performed content actions. Now both
+  // go through this one service which performs the content action and writes a
+  // valid status.
+  async resolveReport(id, action, options = {}) {
+    const Report = require('../models/Report');
+    const Post = require('../models/Post');
+    const Comment = require('../models/Comment');
+    const { updateHidden } = require('../repositories/comment.repo');
+
+    const VALID_ACTIONS = ['HIDE', 'DISMISS', 'MARK_SENSITIVE'];
+    if (!VALID_ACTIONS.includes(action)) {
+      throw this._httpError('Invalid action', 400);
+    }
+
+    const report = await reportRepository.findById(id);
+    if (!report) throw this._httpError('Report not found', 404);
+
+    if (action === 'HIDE') {
+      if (report.target_model === 'Post') {
+        await Post.findByIdAndUpdate(report.target_id, { visibility: 'HIDDEN' });
+      } else if (report.target_model === 'Comment') {
+        await updateHidden(report.target_id, true);
+      }
+      report.status = 'RESOLVED';
+    } else if (action === 'MARK_SENSITIVE') {
+      if (report.target_model === 'Post') {
+        await Post.findByIdAndUpdate(report.target_id, { is_sensitive: true });
+      } else if (report.target_model === 'Comment') {
+        await Comment.findByIdAndUpdate(report.target_id, { is_sensitive: true });
+      }
+      report.status = 'RESOLVED';
+    } else {
+      report.status = 'DISMISSED';
+    }
+
+    await report.save();
+    return report;
   }
 }
 

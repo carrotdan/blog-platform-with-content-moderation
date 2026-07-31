@@ -41,26 +41,31 @@ class CommentService {
     let parentComment = null;
     if (parent_id) {
       parentComment = await commentRepository.findById(parent_id);
-      if (parentComment) {
-        // H37: replies to AI/moderator-hidden comments are not allowed
-        if (parentComment.is_hidden) {
-          const error = new Error('Cannot reply to a hidden comment');
-          error.statusCode = 400;
-          throw error;
-        }
-        // Ensure the reply belongs to the same post
-        if (parentComment.post_id.toString() !== post_id.toString()) {
-          const error = new Error('Parent comment does not belong to this post');
-          error.statusCode = 400;
-          throw error;
-        }
-        depth = parentComment.depth + 1;
-        
-        if (depth >= MAX_COMMENT_DEPTH) {
-          const error = new Error(`Maximum comment depth of ${MAX_COMMENT_DEPTH} exceeded`);
-          error.statusCode = 400;
-          throw error;
-        }
+      // H46: a provided parent_id that doesn't resolve must be a 404, not a
+      // silent downgrade to a top-level comment (that created orphan replies).
+      if (!parentComment) {
+        const error = new Error('Parent comment not found');
+        error.statusCode = 404;
+        throw error;
+      }
+      // H37: replies to AI/moderator-hidden comments are not allowed
+      if (parentComment.is_hidden) {
+        const error = new Error('Cannot reply to a hidden comment');
+        error.statusCode = 400;
+        throw error;
+      }
+      // Ensure the reply belongs to the same post
+      if (parentComment.post_id.toString() !== post_id.toString()) {
+        const error = new Error('Parent comment does not belong to this post');
+        error.statusCode = 400;
+        throw error;
+      }
+      depth = parentComment.depth + 1;
+
+      if (depth >= MAX_COMMENT_DEPTH) {
+        const error = new Error(`Maximum comment depth of ${MAX_COMMENT_DEPTH} exceeded`);
+        error.statusCode = 400;
+        throw error;
       }
     }
 
@@ -185,6 +190,35 @@ class CommentService {
     }
 
     return commentRepository.findByPostId(post_id, skip, limit);
+  }
+
+  async getCommentById(comment_id, current_user_id = null) {
+    // H42: single-comment reads must enforce the same parent-post visibility
+    // rules as getCommentsByPost — a comment under a PRIVATE/HIDDEN post is
+    // only readable by that post's author, everyone else needs PUBLIC.
+    const comment = await commentRepository.findById(comment_id);
+    if (!comment) {
+      const error = new Error('Comment not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const Post = require('../models/Post');
+    const post = await Post.findById(comment.post_id);
+    if (!post) {
+      const error = new Error('Post not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isOwner = current_user_id && post.author.toString() === current_user_id.toString();
+    if (post.visibility !== 'PUBLIC' && !isOwner) {
+      const error = new Error('Post not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    return comment;
   }
 }
 

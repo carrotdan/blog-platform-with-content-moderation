@@ -39,12 +39,13 @@ class CommentController {
   }
   async getCommentById(req, res, next) {
     try {
-      const commentRepository = require('../repositories/comment.repo');
-      const comment = await commentRepository.findById(req.params.id);
+      // H42: visibility of the parent post is enforced in the service (a
+      // comment under a PRIVATE/HIDDEN post is only readable by its author).
+      const comment = await commentService.getCommentById(req.params.id, req.user?.id);
       if (!comment) return res.status(404).json({ success: false, message: 'Comment not found' });
 
       // H22: Hidden/moderated comments must not leak content to non-owners
-      if (comment.is_hidden && comment.author._id.toString() !== req.user.id.toString()) {
+      if (comment.is_hidden && (!req.user || comment.author._id.toString() !== req.user.id.toString())) {
         return res.status(404).json({ success: false, message: 'Comment not found' });
       }
 

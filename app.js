@@ -16,6 +16,14 @@ const { requestIdMiddleware, addRequestIdToLogger, errorLoggerMiddleware } = req
 
 const app = express();
 
+// H45: rate limits are keyed on req.ip. Behind a reverse proxy (Nginx,
+// Cloudflare) req.ip is the proxy IP unless trust proxy is set — every client
+// would share one limit bucket and real IPs would be indistinguishable.
+// Env-gated: TRUST_PROXY=1 for a single proxy hop, TRUST_PROXY=true to trust all.
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : Number(process.env.TRUST_PROXY));
+}
+
 // Middlewares
 app.use(helmet({
   contentSecurityPolicy: {
@@ -32,8 +40,19 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false
 }));
+// H49: CLIENT_URL may be a comma-separated allow-list (e.g.
+// "http://localhost:3000,http://localhost:5173"). The cors package takes a
+// single origin or an array; passing the raw comma string would echo it back
+// verbatim in Access-Control-Allow-Origin and break every preflight.
+const allowedOrigins = String(process.env.CLIENT_URL || 'http://localhost:3000')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: allowedOrigins.length === 1
+    ? allowedOrigins[0]
+    : allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '1mb' }));
