@@ -140,6 +140,23 @@ describe('Auth flow', () => {
     expect(res.body.data.refreshToken).toBeDefined();
     expect(res.body.data.refreshToken).not.toBe(refreshToken);
   });
+
+  test('H31: refresh works with only the httpOnly cookie (no body token)', async () => {
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'test@example.com', password: 'password123' });
+    expect(login.status).toBe(200);
+    const cookies = login.headers['set-cookie'];
+    expect(Array.isArray(cookies)).toBe(true);
+
+    const res = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookies);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.accessToken).toBeDefined();
+    expect(res.body.data.refreshToken).toBeDefined();
+  });
 });
 
 describe('Post flow', () => {
@@ -708,6 +725,233 @@ describe('Sprint 12 fixes (C20-C25)', () => {
       expect(u.refreshTokens).toBeUndefined();
       expect(u.password).toBeUndefined();
     });
+  });
+});
+
+describe('Sprint 13 fixes (H31-H41)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  const createFlaggedPost = async (token, content, label = 'SPAM') => {
+    const aiService = require('../../services/ai.service');
+    aiService.analyze.mockResolvedValueOnce({
+      spam_score: label === 'SPAM' ? 0.9 : 0.1,
+      toxicity_score: label === 'TOXIC' ? 0.9 : 0.1,
+      label
+    });
+    const res = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: `<p>${content}</p>` });
+    return res;
+  };
+
+  test('H32: a title-only update re-runs AI moderation', async () => {
+    const aiService = require('../../services/ai.service');
+    const owner = await createUser('sprint13a@example.com', 'sprint13a');
+    const token = mintToken(owner._id.toString());
+
+    const created = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: '<p>clean body</p>', title: 'Safe title' });
+    expect(created.status).toBe(201);
+
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    const res = await request(app)
+      .put(`/api/v1/posts/${created.body.data._id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Toxic new title' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.label).toBe('SPAM');
+    expect(res.body.data.visibility).toBe('HIDDEN');
+  });
+
+  test('H33: editing a hidden post does not auto-unhide it', async () => {
+    const owner = await createUser('sprint13b@example.com', 'sprint13b');
+    const token = mintToken(owner._id.toString());
+
+    const hidden = await createFlaggedPost(token, 'initial spam', 'SPAM');
+    expect(hidden.body.data.visibility).toBe('HIDDEN');
+
+    const res = await request(app)
+      .put(`/api/v1/posts/${hidden.body.data._id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: '<p>totally clean now</p>' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.visibility).toBe('HIDDEN');
+  });
+
+  test('H34: MODERATOR cannot ban or change roles but can review content', async () => {
+    const target = await createUser('sprint13c@example.com', 'sprint13c');
+    const mod = await createUser('sprint13mod@example.com', 'sprint13mod');
+    const modToken = mintToken(mod._id.toString(), 'MODERATOR');
+
+    const banRes = await request(app)
+      .put(`/api/v1/admin/users/${target._id.toString()}/ban`)
+      .set('Authorization', `Bearer ${modToken}`);
+    expect(banRes.status).toBe(403);
+
+    const roleRes = await request(app)
+      .put(`/api/v1/admin/users/${target._id.toString()}/role`)
+      .set('Authorization', `Bearer ${modToken}`)
+      .send({ role: 'ADMIN' });
+    expect(roleRes.status).toBe(403);
+
+    const Post = mongoose.model('Post');
+    const post = await Post.create({
+      author: target._id,
+      slug: `sprint13-mod-post-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>x</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+    const hideRes = await request(app)
+      .put(`/api/v1/admin/posts/${post._id.toString()}/hide`)
+      .set('Authorization', `Bearer ${modToken}`);
+    expect(hideRes.status).toBe(200);
+  });
+
+  test('H35: a banned admin cannot list reports', async () => {
+    const bannedAdmin = await createUser('sprint13bannedadmin@example.com', 'bannedadmin');
+    bannedAdmin.status = 'BANNED';
+    await bannedAdmin.save();
+    const bannedAdminToken = mintToken(bannedAdmin._id.toString(), 'ADMIN');
+
+    const res = await request(app)
+      .get('/api/v1/reports')
+      .set('Authorization', `Bearer ${bannedAdminToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('H36: comments under a PRIVATE post are not publicly readable', async () => {
+    const owner = await createUser('sprint13priv@example.com', 'sprint13priv');
+    const ownerToken = mintToken(owner._id.toString());
+    const Post = mongoose.model('Post');
+    const privatePost = await Post.create({
+      author: owner._id,
+      slug: `sprint13-priv-post-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>private</p>',
+      visibility: 'PRIVATE',
+      status: 'PUBLISHED'
+    });
+
+    const commentRes = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ post_id: privatePost._id.toString(), content: 'owner comment' });
+    expect(commentRes.status).toBe(201);
+
+    const guestRes = await request(app)
+      .get(`/api/v1/comments/post/${privatePost._id.toString()}`);
+    expect(guestRes.status).toBe(404);
+
+    const ownerRes = await request(app)
+      .get(`/api/v1/comments/post/${privatePost._id.toString()}`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(ownerRes.status).toBe(200);
+  });
+
+  test('H37: a reply to a hidden comment is rejected', async () => {
+    const owner = await createUser('sprint13h37@example.com', 'sprint13h37');
+    const ownerToken = mintToken(owner._id.toString());
+    const Post = mongoose.model('Post');
+    const post = await Post.create({
+      author: owner._id,
+      slug: `sprint13-h37-post-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>x</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+    const Comment = mongoose.model('Comment');
+    const hiddenParent = await Comment.create({
+      post_id: post._id,
+      author: owner._id,
+      content: 'hidden parent',
+      is_hidden: true
+    });
+
+    const res = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ post_id: post._id.toString(), parent_id: hiddenParent._id.toString(), content: 'reply' });
+    expect(res.status).toBe(400);
+  });
+
+  test('H38: cannot message yourself or a non-existent user', async () => {
+    const user = await createUser('sprint13msg@example.com', 'sprint13msg');
+    const token = mintToken(user._id.toString());
+
+    const selfRes = await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ recipientId: user._id.toString(), content: 'hi me' });
+    expect(selfRes.status).toBe(400);
+
+    const ghostRes = await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ recipientId: '000000000000000000000000', content: 'hi ghost' });
+    expect(ghostRes.status).toBe(404);
+
+    const convRes = await request(app)
+      .post('/api/v1/messages/conversations')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ recipientId: user._id.toString() });
+    expect(convRes.status).toBe(400);
+  });
+
+  test('H39: getMessages is paginated and oldest-first', async () => {
+    const a = await createUser('sprint13ma@example.com', 'sprint13ma');
+    const b = await createUser('sprint13mb@example.com', 'sprint13mb');
+    const tokenA = mintToken(a._id.toString());
+    const tokenB = mintToken(b._id.toString());
+
+    const conv = await request(app)
+      .post('/api/v1/messages/conversations')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientId: b._id.toString() });
+    expect(conv.status).toBe(200);
+    const convId = conv.body.data._id;
+
+    await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientId: b._id.toString(), content: 'first' });
+    await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientId: b._id.toString(), content: 'second' });
+    await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ recipientId: a._id.toString(), content: 'third' });
+
+    const res = await request(app)
+      .get(`/api/v1/messages/${convId}?skip=0&limit=2`)
+      .set('Authorization', `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+    expect(res.body.meta.limit).toBe(2);
+    expect(res.body.data.length).toBe(2);
+    expect(res.body.data[0].content).toBe('first');
+    expect(res.body.data[1].content).toBe('second');
   });
 });
 

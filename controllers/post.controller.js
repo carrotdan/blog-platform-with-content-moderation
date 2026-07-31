@@ -1,5 +1,5 @@
 const postService = require('../services/post.service');
-const { uploadToCloudinary } = require('../services/cloudinary.service');
+const { uploadToCloudinary, destroyAssets } = require('../services/cloudinary.service');
 const { sanitizeHtml } = require('../utils/sanitize');
 
 class PostController {
@@ -13,21 +13,28 @@ class PostController {
       
       let uploadedMedia = [];
       if (files.length > 0) {
-        const uploadPromises = files.map(async (file, index) => {
-          const isVideo = file.mimetype.startsWith('video/');
-          const result = await uploadToCloudinary(file.buffer, 'posts_media', isVideo ? 'video' : 'image');
-          return {
-            type: isVideo ? 'VIDEO' : 'IMAGE',
-            url: result.secure_url,
-            public_id: result.public_id,
-            width: result.width,
-            height: result.height,
-            duration: result.duration,
-            order_index: index
-          };
-        });
-        
-        uploadedMedia = await Promise.all(uploadPromises);
+        const uploaded = [];
+        try {
+          // H41: upload sequentially so we can track already-uploaded public_ids
+          // and clean them up if a later file fails (avoids orphaned assets).
+          for (const [index, file] of files.entries()) {
+            const isVideo = file.mimetype.startsWith('video/');
+            const result = await uploadToCloudinary(file.buffer, 'posts_media', isVideo ? 'video' : 'image');
+            uploaded.push({
+              type: isVideo ? 'VIDEO' : 'IMAGE',
+              url: result.secure_url,
+              public_id: result.public_id,
+              width: result.width,
+              height: result.height,
+              duration: result.duration,
+              order_index: index
+            });
+          }
+          uploadedMedia = uploaded;
+        } catch (error) {
+          await destroyAssets(uploaded.map(m => m.public_id));
+          throw error;
+        }
       }
 
       let parsedContentJson = { text: req.body.content || '' };

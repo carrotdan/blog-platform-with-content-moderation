@@ -10,7 +10,9 @@ router.use(authenticate, checkStatus, authorize(['ADMIN', 'MODERATOR']));
 
 router.get('/violations', adminController.getViolations);
 router.get('/users', adminController.getUsers);
-router.put('/users/:id/role', validate(idParamSchema), adminController.changeRole);
+// H34: User-management actions (role/ban/mute/reset-score) are ADMIN-only.
+// MODERATORs may review content but must not escalate privileges.
+router.put('/users/:id/role', authorize('ADMIN'), validate(idParamSchema), adminController.changeRole);
 
 router.get('/posts', adminController.getPosts);
 router.put('/posts/:id/hide', validate(idParamSchema), adminController.hidePost);
@@ -22,8 +24,8 @@ router.delete('/posts/:id', validate(idParamSchema), adminController.deletePost)
 router.get('/reports', adminController.getReports);
 router.put('/reports/:id/resolve', validate(idParamSchema), adminController.resolveReport);
 
-router.put('/users/:id/mute', validate(idParamSchema), adminController.muteUser);
-router.put('/users/:id/ban', validate(idParamSchema), adminController.banUser);
-router.put('/users/:id/reset-score', validate(idParamSchema), adminController.resetScore);
+router.put('/users/:id/mute', authorize('ADMIN'), validate(idParamSchema), adminController.muteUser);
+router.put('/users/:id/ban', authorize('ADMIN'), validate(idParamSchema), adminController.banUser);
+router.put('/users/:id/reset-score', authorize('ADMIN'), validate(idParamSchema), adminController.resetScore);
 
 module.exports = router;

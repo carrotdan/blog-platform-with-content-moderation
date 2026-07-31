@@ -3,7 +3,22 @@ const messageRepo = require('../repositories/message.repo');
 const socketService = require('./socket.service');
 
 class MessageService {
+  // H38: a conversation/message recipient must exist and differ from the sender,
+  // otherwise ghost/self conversations are created.
+  async validateRecipient(senderId, recipientId) {
+    if (!recipientId) throw this._httpError('Recipient is required', 400);
+    if (senderId.toString() === recipientId.toString()) {
+      throw this._httpError('Cannot message yourself', 400);
+    }
+    const User = require('../models/User');
+    const recipient = await User.findOne({ _id: recipientId, isDeleted: false }).select('_id');
+    if (!recipient) throw this._httpError('Recipient not found', 404);
+    return recipient;
+  }
+
   async sendMessage(senderId, recipientId, content, media = []) {
+    await this.validateRecipient(senderId, recipientId);
+
     const conversation = await conversationRepo.findOrCreate([senderId, recipientId]);
     
     const message = await messageRepo.create({
@@ -28,7 +43,7 @@ class MessageService {
     return conversationRepo.findByUser(userId);
   }
 
-  async getMessages(conversationId, userId) {
+  async getMessages(conversationId, userId, skip = 0, limit = 50) {
     // Check if user is part of conversation
     const conversation = await conversationRepo.findById(conversationId);
     if (!conversation) throw this._httpError('Conversation not found', 404);
@@ -37,7 +52,7 @@ class MessageService {
     if (!isParticipant) throw this._httpError('Unauthorized', 403);
 
     await messageRepo.markAsRead(conversationId, userId);
-    return messageRepo.findByConversation(conversationId);
+    return messageRepo.findByConversation(conversationId, limit, skip);
   }
 
   _httpError(message, statusCode) {

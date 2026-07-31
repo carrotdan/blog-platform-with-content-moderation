@@ -42,6 +42,12 @@ class CommentService {
     if (parent_id) {
       parentComment = await commentRepository.findById(parent_id);
       if (parentComment) {
+        // H37: replies to AI/moderator-hidden comments are not allowed
+        if (parentComment.is_hidden) {
+          const error = new Error('Cannot reply to a hidden comment');
+          error.statusCode = 400;
+          throw error;
+        }
         // Ensure the reply belongs to the same post
         if (parentComment.post_id.toString() !== post_id.toString()) {
           const error = new Error('Parent comment does not belong to this post');
@@ -72,29 +78,32 @@ class CommentService {
 
     const newComment = await commentRepository.create(commentData);
 
-    // Notification Logic
-    if (parent_id) {
-      // It's a REPLY
-      // H27: author is populated here, so compare against _id, not toString()
-      if (parentComment && parentComment.author._id.toString() !== user_id.toString()) {
-        await notificationService.sendNotification({
-          recipient: parentComment.author._id,
-          sender: user_id,
-          type: 'REPLY',
-          entity_id: newComment._id,
-          entity_model: 'Comment'
-        });
-      }
-    } else {
-      // It's a COMMENT on a Post (post already loaded above)
-      if (post && post.author.toString() !== user_id.toString()) {
-        await notificationService.sendNotification({
-          recipient: post.author,
-          sender: user_id,
-          type: 'COMMENT',
-          entity_id: newComment._id,
-          entity_model: 'Comment'
-        });
+    // Notification Logic — H37: never notify for AI-flagged (hidden) comments,
+    // otherwise recipients get notifications for content they cannot see.
+    if (!is_hidden) {
+      if (parent_id) {
+        // It's a REPLY
+        // H27: author is populated here, so compare against _id, not toString()
+        if (parentComment && parentComment.author._id.toString() !== user_id.toString()) {
+          await notificationService.sendNotification({
+            recipient: parentComment.author._id,
+            sender: user_id,
+            type: 'REPLY',
+            entity_id: newComment._id,
+            entity_model: 'Comment'
+          });
+        }
+      } else {
+        // It's a COMMENT on a Post (post already loaded above)
+        if (post && post.author.toString() !== user_id.toString()) {
+          await notificationService.sendNotification({
+            recipient: post.author,
+            sender: user_id,
+            type: 'COMMENT',
+            entity_id: newComment._id,
+            entity_model: 'Comment'
+          });
+        }
       }
     }
 
@@ -156,7 +165,25 @@ class CommentService {
     return newComment;
   }
 
-  async getCommentsByPost(post_id, skip = 0, limit = 20) {
+  async getCommentsByPost(post_id, current_user_id = null, skip = 0, limit = 20) {
+    // H36: Enforce the same visibility rules as getPost — comments under a post
+    // that was made PRIVATE/HIDDEN must not be exposed. Only the author may view
+    // comments of their own non-PUBLIC posts; everyone else needs PUBLIC.
+    const Post = require('../models/Post');
+    const post = await Post.findById(post_id);
+    if (!post) {
+      const error = new Error('Post not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isOwner = current_user_id && post.author.toString() === current_user_id.toString();
+    if (post.visibility !== 'PUBLIC' && !isOwner) {
+      const error = new Error('Post not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
     return commentRepository.findByPostId(post_id, skip, limit);
   }
 }

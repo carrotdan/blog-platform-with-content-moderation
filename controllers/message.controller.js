@@ -13,6 +13,8 @@ class MessageController {
   async getOrCreateConversation(req, res, next) {
     try {
       const { recipientId } = req.body;
+      // H38: reject self/ghost conversations
+      await messageService.validateRecipient(req.user.id, recipientId);
       const conversationRepo = require('../repositories/conversation.repo');
       const conversation = await conversationRepo.findOrCreate([req.user.id, recipientId]);
       res.status(200).json({ success: true, data: conversation });
@@ -24,8 +26,10 @@ class MessageController {
   async getMessages(req, res, next) {
     try {
       const { conversationId } = req.params;
-      const messages = await messageService.getMessages(conversationId, req.user.id);
-      res.status(200).json({ success: true, data: messages });
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 50, 100);
+      const messages = await messageService.getMessages(conversationId, req.user.id, skip, limit);
+      res.status(200).json({ success: true, data: messages, meta: { skip, limit } });
     } catch (error) {
       next(error);
     }
@@ -37,16 +41,26 @@ class MessageController {
       let media = [];
       
       if (req.files && req.files.length > 0) {
-        const { uploadToCloudinary } = require('../services/cloudinary.service');
-        const uploadPromises = req.files.map(async (file) => {
-          const isVideo = file.mimetype.startsWith('video/');
-          const result = await uploadToCloudinary(file.buffer, 'message_media', isVideo ? 'video' : 'image');
-          return {
-            url: result.secure_url,
-            type: isVideo ? 'VIDEO' : 'IMAGE'
-          };
-        });
-        media = await Promise.all(uploadPromises);
+        const { uploadToCloudinary, destroyAssets } = require('../services/cloudinary.service');
+        const uploaded = [];
+        const uploadedPublicIds = [];
+        try {
+          // H41: upload sequentially and track public_ids so a partial failure
+          // cleans up already-uploaded assets (no orphaned media).
+          for (const file of req.files) {
+            const isVideo = file.mimetype.startsWith('video/');
+            const result = await uploadToCloudinary(file.buffer, 'message_media', isVideo ? 'video' : 'image');
+            uploadedPublicIds.push(result.public_id);
+            uploaded.push({
+              url: result.secure_url,
+              type: isVideo ? 'VIDEO' : 'IMAGE'
+            });
+          }
+          media = uploaded;
+        } catch (error) {
+          await destroyAssets(uploadedPublicIds);
+          throw error;
+        }
       }
 
       const message = await messageService.sendMessage(req.user.id, recipientId, content, media);

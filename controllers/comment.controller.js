@@ -21,7 +21,12 @@ class CommentController {
     try {
       const { postId } = req.params;
       const { skip, limit } = req.query;
-      const comments = await commentService.getCommentsByPost(postId, Number(skip) || 0, Number(limit) || 20);
+      const comments = await commentService.getCommentsByPost(
+        postId,
+        req.user?.id,
+        Number(skip) || 0,
+        Number(limit) || 20
+      );
       
       res.status(200).json({
         success: true,

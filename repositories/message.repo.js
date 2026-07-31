@@ -6,8 +6,9 @@ class MessageRepository {
   }
 
   async findByConversation(conversationId, limit = 50, skip = 0) {
+    // H39: oldest-first ordering for a natural chat scroll / stable pagination
     return Message.find({ conversation_id: conversationId })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .skip(skip)
       .limit(limit);
   }

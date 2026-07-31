@@ -16,8 +16,8 @@ const contentCreateLimiter = rateLimit({
 
 router.post('/', authenticate, checkStatus, contentCreateLimiter, validate(reportSchema), reportController.createReport);
 
-// Admin routes
-router.get('/', authenticate, authorize(['ADMIN']), reportController.listReports);
-router.put('/:id', authenticate, authorize(['ADMIN']), validate(idParamSchema), reportController.resolveReport);
+// Admin routes (H35: banned/muted admins must not list/resolve reports)
+router.get('/', authenticate, checkStatus, authorize(['ADMIN']), reportController.listReports);
+router.put('/:id', authenticate, checkStatus, authorize(['ADMIN']), validate(idParamSchema), reportController.resolveReport);
 
 module.exports = router;

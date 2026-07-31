@@ -18,8 +18,10 @@ const loginSchema = z.object({
 });
 
 const refreshSchema = z.object({
+  // H31: token may arrive via the httpOnly cookie (the whole point of the cookie
+  // flow). Body token is optional so cookie-only clients pass validation.
   body: z.object({
-    refreshToken: z.string().min(1, 'Refresh token is required')
+    refreshToken: z.string().min(1, 'Refresh token is required').optional()
   })
 });
 
@@ -171,6 +173,17 @@ const userIdParamSchema = objectIdParam('userId');
 const conversationIdParamSchema = objectIdParam('conversationId');
 const messageIdParamSchema = objectIdParam('messageId');
 
+// H39: GET /messages/:conversationId with bounded pagination
+const conversationMessagesSchema = z.object({
+  params: z.object({
+    conversationId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid conversation ID')
+  }),
+  query: z.object({
+    skip: z.coerce.number().int().min(0).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional()
+  })
+});
+
 const usernameParamSchema = z.object({
   params: z.object({
     username: z.string().min(1, 'Username is required').max(30)
@@ -202,5 +215,6 @@ module.exports = {
   userIdParamSchema,
   conversationIdParamSchema,
   messageIdParamSchema,
+  conversationMessagesSchema,
   usernameParamSchema
 };

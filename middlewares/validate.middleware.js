@@ -2,10 +2,11 @@ const { ZodError } = require('zod');
 
 const validate = (schema) => (req, res, next) => {
   try {
+    // Normalize so body-less requests (e.g. cookie-only refresh, GET) parse fine
     const result = schema.parse({
-      body: req.body,
-      query: req.query,
-      params: req.params
+      body: req.body ?? {},
+      query: req.query ?? {},
+      params: req.params ?? {}
     });
     
     // Merge validated data back into req

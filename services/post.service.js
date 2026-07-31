@@ -285,8 +285,11 @@ async updatePost(id, data, user_id) {
     }
     if (data.tags) updateData.tags = data.tags;
 
-    // Re-run AI moderation if content changed
-    if (data.content_html || data.content_json) {
+    // H32: Re-run AI moderation whenever the title or body changes (a title-only
+    // edit previously skipped analysis, letting users retitle posts with
+    // toxic/spam text that stayed PUBLIC with stale scores).
+    const contentChanged = !!(data.content_html || data.content_json || data.title);
+    if (contentChanged) {
       const aiService = require('./ai.service');
       const bodyText = data.content_html ? data.content_html.replace(/<[^>]+>/g, ' ') : '';
       const analyzeText = [data.title || post.title || '', bodyText].filter(Boolean).join(' ').trim();
@@ -297,7 +300,17 @@ async updatePost(id, data, user_id) {
       updateData.spam_score = spam_score;
       updateData.toxicity_score = toxicity_score;
       updateData.label = label;
-      updateData.visibility = isFlagged ? 'HIDDEN' : (data.visibility || 'PUBLIC');
+
+      // H33: Do NOT auto-unhide content that is currently HIDDEN — that state is
+      // cleared only by an explicit moderation action (queue review / appeal
+      // approval). Editing a hidden post to clean content keeps it HIDDEN.
+      if (isFlagged) {
+        updateData.visibility = 'HIDDEN';
+      } else if (post.visibility === 'HIDDEN') {
+        updateData.visibility = 'HIDDEN';
+      } else {
+        updateData.visibility = data.visibility || post.visibility || 'PUBLIC';
+      }
 
       if (isFlagged) {
         const moderationRepository = require('../repositories/moderation.repo');
