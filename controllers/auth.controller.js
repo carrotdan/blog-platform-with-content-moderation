@@ -1,12 +1,19 @@
 const authService = require('../services/auth.service');
+const userService = require('../services/user.service');
 
 class AuthController {
   async register(req, res) {
     try {
-      const user = await authService.register(req.body);
+      // Register + auto-login so the client receives access/refresh tokens
+      // (consistent with the removed /users/register endpoint)
+      const result = await userService.register(req.body);
       res.status(201).json({
         success: true,
-        data: user,
+        data: {
+          user: result.user,
+          accessToken: result.tokens.accessToken,
+          refreshToken: result.tokens.refreshToken
+        },
         message: 'User registered successfully'
       });
     } catch (error) {

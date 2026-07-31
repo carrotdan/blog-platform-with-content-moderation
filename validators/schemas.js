@@ -6,8 +6,7 @@ const registerSchema = z.object({
     password: z.string().min(8, 'Password must be at least 8 characters'),
     username: z.string().min(3, 'Username must be at least 3 characters').max(30).optional(),
     avatar: z.string().url('Avatar must be a valid URL').optional(),
-    bio: z.string().max(500, 'Bio must be at most 500 characters').optional(),
-    role: z.enum(['USER', 'MODERATOR', 'ADMIN']).optional()
+    bio: z.string().max(500, 'Bio must be at most 500 characters').optional()
   })
 });
 

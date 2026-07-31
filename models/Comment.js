@@ -11,7 +11,7 @@ const commentSchema = new mongoose.Schema(
     // AI Moderation Fields
     spam_score: { type: Number, default: 0 },
     toxicity_score: { type: Number, default: 0 },
-    label: { type: String, enum: ['NORMAL', 'SPAM', 'TOXIC'], default: 'NORMAL' },
+    label: { type: String, enum: ['NORMAL', 'SPAM', 'TOXIC', 'AI_UNAVAILABLE'], default: 'NORMAL' },
     is_hidden: { type: Boolean, default: false },
     is_sensitive: { type: Boolean, default: false }
   },

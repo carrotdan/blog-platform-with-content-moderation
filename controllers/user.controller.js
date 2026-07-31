@@ -76,6 +76,16 @@ class UserController {
 
   async logout(req, res, next) {
     try {
+      // C19: Revoke the refresh token server-side so it can no longer be used
+      const refreshToken = req.body?.refreshToken || req.cookies?.refreshToken;
+      const authService = require('../services/auth.service');
+      if (refreshToken) {
+        await authService.logout(req.user.id, refreshToken);
+      } else {
+        // No specific token provided - revoke all sessions for this user
+        await authService.logoutAll(req.user.id);
+      }
+
       res.clearCookie('refreshToken');
       res.status(200).json({ success: true, message: 'Logout successful', data: null });
     } catch (error) {

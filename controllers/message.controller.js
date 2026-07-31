@@ -37,8 +37,15 @@ class MessageController {
       let media = [];
       
       if (req.files && req.files.length > 0) {
-        const cloudinaryService = require('../services/cloudinary.service');
-        const uploadPromises = req.files.map(file => cloudinaryService.uploadFile(file));
+        const { uploadToCloudinary } = require('../services/cloudinary.service');
+        const uploadPromises = req.files.map(async (file) => {
+          const isVideo = file.mimetype.startsWith('video/');
+          const result = await uploadToCloudinary(file.buffer, 'message_media', isVideo ? 'video' : 'image');
+          return {
+            url: result.secure_url,
+            type: isVideo ? 'VIDEO' : 'IMAGE'
+          };
+        });
         media = await Promise.all(uploadPromises);
       }
 

@@ -5,9 +5,6 @@ const { authenticate, optionalAuthenticate, checkStatus } = require('../middlewa
 const { validate } = require('../middlewares/validate.middleware');
 const { paginationSchema, usernameParamSchema } = require('../validators/schemas');
 
-router.post('/register', userController.register);
-router.post('/login', userController.login);
-router.post('/refresh', userController.refreshToken);
 router.post('/logout', authenticate, userController.logout);
 router.put('/profile', authenticate, checkStatus, userController.updateProfile);
 router.get('/me', authenticate, checkStatus, userController.getMe);

@@ -16,7 +16,7 @@ class AuthService {
   }
 
   async register(data) {
-    const { email, password, role, avatar, bio, username } = data;
+    const { email, password, avatar, bio, username } = data;
     
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -29,11 +29,12 @@ class AuthService {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create the new user
+    // C14: Always create with USER role. Role changes are only allowed via admin endpoints.
     const newUser = new User({
       email,
       username: username || email.split('@')[0] + Math.floor(Math.random() * 10000),
       password: hashedPassword,
-      role: role || 'USER',
+      role: 'USER',
       avatar,
       bio
     });

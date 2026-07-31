@@ -80,11 +80,13 @@ describe('Auth flow', () => {
       .send({ email: 'test@example.com', password: 'password123', username: 'testuser' });
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(res.body.data._id).toBeDefined();
-    expect(res.body.data.email).toBe('test@example.com');
+    expect(res.body.data.user.id).toBeDefined();
+    expect(res.body.data.user.email).toBe('test@example.com');
+    expect(res.body.data.accessToken).toBeDefined();
+    expect(res.body.data.refreshToken).toBeDefined();
     // Password must never be exposed
-    expect(res.body.data.password).toBeUndefined();
-    user = res.body.data;
+    expect(res.body.data.user.password).toBeUndefined();
+    user = res.body.data.user;
   });
 
   test('POST /api/v1/auth/register rejects duplicate email', async () => {

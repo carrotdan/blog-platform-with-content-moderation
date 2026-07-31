@@ -59,10 +59,10 @@ class UserService {
 
   async getFollowSuggestions(userId, limit = 5) {
     const following = await followService.getFollowing(userId);
-    const followingIds = following.map(f => f.following.toString());
+    const followingIds = following.map(f => ((f.following_id && f.following_id._id) || f.following_id).toString());
     followingIds.push(userId.toString());
 
-    return User.find({ _id: { $nin: followingIds } })
+    return User.find({ _id: { $nin: followingIds }, isDeleted: false })
       .select('username avatar bio')
       .limit(limit);
   }
