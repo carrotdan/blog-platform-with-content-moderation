@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const commentController = require('../controllers/comment.controller');
 const { authenticate, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
-const { createCommentSchema, getPostSchema, paginationSchema } = require('../validators/schemas');
+const { createCommentSchema, getPostSchema, paginationSchema, postIdParamSchema } = require('../validators/schemas');
 
 const contentCreateLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -14,7 +14,7 @@ const contentCreateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-router.get('/post/:postId', validate(paginationSchema), commentController.getComments);
+router.get('/post/:postId', validate(paginationSchema), validate(postIdParamSchema), commentController.getComments);
 router.get('/:id', authenticate, validate(getPostSchema), commentController.getCommentById);
 router.post('/', authenticate, checkStatus, contentCreateLimiter, validate(createCommentSchema), commentController.createComment);
 

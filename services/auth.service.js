@@ -48,8 +48,8 @@ class AuthService {
   }
 
   async login(email, password) {
-    // Find the user by email
-    const user = await User.findOne({ email });
+    // Find the user by email (password is select:false on the schema, re-include it)
+    const user = await User.findOne({ email }).select('+password');
     if (!user) {
       throw new Error('Invalid email or password');
     }
@@ -76,7 +76,8 @@ class AuthService {
     // Generate tokens
     const payload = {
       userId: user._id.toString(),
-      role: user.role
+      role: user.role,
+      jti: crypto.randomUUID()
     };
 
     const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
@@ -149,7 +150,8 @@ class AuthService {
       // Generate new tokens
       const payload = {
         userId: user._id.toString(),
-        role: user.role
+        role: user.role,
+        jti: crypto.randomUUID()
       };
 
       const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {

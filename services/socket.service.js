@@ -4,11 +4,32 @@ const logger = require('../utils/logger');
 
 let io;
 
+const ALLOWED_ORIGINS = (process.env.CLIENT_URL || 'http://localhost:3000')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  return ALLOWED_ORIGINS.includes('*');
+}
+
 module.exports = {
   io: null,
   init: (server) => {
     io = socketIo(server, {
-      cors: { origin: process.env.CLIENT_URL || 'http://localhost:3000' },
+      cors: {
+        origin: (origin, callback) => {
+          if (isOriginAllowed(origin)) {
+            callback(null, true);
+          } else {
+            logger.warn('[Socket] Connection rejected from disallowed origin', { origin });
+            callback(new Error('Origin not allowed'));
+          }
+        },
+        credentials: true
+      },
       pingInterval: 25000,
       pingTimeout: 20000
     });

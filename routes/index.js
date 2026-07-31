@@ -1,5 +1,9 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
+
+const aiService = require('../services/ai.service');
+const logger = require('../utils/logger');
 
 const authRoutes = require('./auth.routes');
 const userRoutes = require('./user.routes');
@@ -32,9 +36,44 @@ v1Router.use('/appeals', appealRoutes);
 
 router.use('/v1', v1Router);
 
-// Health check endpoint (no version)
-router.get('/health', (req, res) => {
-  res.json({ success: true, message: 'API is healthy', version: '1.0.0' });
+// Health check endpoint (no version) - checks critical dependencies
+router.get('/health', async (req, res) => {
+  const start = Date.now();
+
+  const dbStates = ['DISCONNECTED', 'CONNECTED', 'CONNECTING', 'DISCONNECTING'];
+  const dbState = mongoose.connection.readyState;
+  const dbUp = dbState === 1;
+
+  let aiUp = false;
+  try {
+    aiUp = await aiService.isHealthy();
+  } catch (err) {
+    logger.warn('[Health] AI service health check failed', { error: err.message });
+  }
+
+  const checks = {
+    database: {
+      status: dbUp ? 'up' : 'down',
+      state: dbStates[dbState] || 'UNKNOWN'
+    },
+    aiService: {
+      status: aiUp ? 'up' : 'down'
+    }
+  };
+
+  const responseTime = Date.now() - start;
+
+  // Database is the critical dependency; AI being down does not take the
+  // service down (AI failures fail-closed), so it only marks the service degraded.
+  const status = dbUp ? 200 : 503;
+
+  res.status(status).json({
+    success: dbUp,
+    message: dbUp ? (aiUp ? 'All systems operational' : 'Service healthy, AI service degraded') : 'Service unavailable',
+    version: '1.0.0',
+    checks,
+    responseTime: `${responseTime}ms`
+  });
 });
 
 module.exports = router;

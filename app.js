@@ -7,6 +7,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const morgan = require('morgan');
+const helmet = require('helmet');
 
 const { errorMiddleware } = require('./middlewares/error.middleware');
 const routes = require('./routes');
@@ -16,6 +17,21 @@ const { requestIdMiddleware, addRequestIdToLogger, errorLoggerMiddleware } = req
 const app = express();
 
 // Middlewares
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      frameSrc: ["'none'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
@@ -106,22 +122,25 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('unhandledRejection');
 });
 
-mongoose.connect(MONGODB_URI, {
-  maxPoolSize: 10,
-  minPoolSize: 2,
-  socketTimeoutMS: 45000,
-  serverSelectionTimeoutMS: 5000,
-  family: 4
-})
-  .then(() => {
-    console.log('Connected to MongoDB');
-    server.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
+async function startServer() {
+  await mongoose.connect(MONGODB_URI, {
+    maxPoolSize: 10,
+    minPoolSize: 2,
+    socketTimeoutMS: 45000,
+    serverSelectionTimeoutMS: 5000,
+    family: 4
+  });
+  console.log('Connected to MongoDB');
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  startServer().catch((err) => {
     console.error('Failed to connect to MongoDB', err);
     process.exit(1);
   });
+}
 
 module.exports = app;

@@ -3,6 +3,8 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const reportController = require('../controllers/report.controller');
 const { authenticate, authorize } = require('../middlewares/auth.middleware');
+const { validate } = require('../middlewares/validate.middleware');
+const { idParamSchema } = require('../validators/schemas');
 
 const contentCreateLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -16,6 +18,6 @@ router.post('/', authenticate, contentCreateLimiter, reportController.createRepo
 
 // Admin routes
 router.get('/', authenticate, authorize(['ADMIN']), reportController.listReports);
-router.put('/:id', authenticate, authorize(['ADMIN']), reportController.resolveReport);
+router.put('/:id', authenticate, authorize(['ADMIN']), validate(idParamSchema), reportController.resolveReport);
 
 module.exports = router;

@@ -24,12 +24,19 @@ const refreshSchema = z.object({
   })
 });
 
+const tagsSchema = z.preprocess(
+  (val) => typeof val === 'string'
+    ? val.split(',').map(t => t.trim()).filter(Boolean)
+    : val,
+  z.array(z.string().min(1)).max(20).optional()
+);
+
 const createPostSchema = z.object({
   body: z.object({
     title: z.string().min(1, 'Title is required').max(200).optional(),
     content_html: z.string().min(1, 'Content is required'),
     content_json: z.any().optional(),
-    tags: z.array(z.string()).optional(),
+    tags: tagsSchema,
     visibility: z.enum(['PUBLIC', 'PRIVATE', 'HIDDEN']).optional()
   })
 });
@@ -39,7 +46,7 @@ const updatePostSchema = z.object({
     title: z.string().min(1).max(200).optional(),
     content_html: z.string().optional(),
     content_json: z.any().optional(),
-    tags: z.array(z.string()).optional(),
+    tags: tagsSchema,
     visibility: z.enum(['PUBLIC', 'PRIVATE', 'HIDDEN']).optional()
   }),
   params: z.object({
@@ -128,6 +135,24 @@ const paginationSchema = z.object({
   })
 });
 
+const objectIdParam = (name) => z.object({
+  params: z.object({
+    [name]: z.string().regex(/^[0-9a-fA-F]{24}$/, `Invalid ${name}`)
+  })
+});
+
+const idParamSchema = objectIdParam('id');
+const postIdParamSchema = objectIdParam('postId');
+const userIdParamSchema = objectIdParam('userId');
+const conversationIdParamSchema = objectIdParam('conversationId');
+const messageIdParamSchema = objectIdParam('messageId');
+
+const usernameParamSchema = z.object({
+  params: z.object({
+    username: z.string().min(1, 'Username is required').max(30)
+  })
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -143,5 +168,11 @@ module.exports = {
   approveAppealSchema,
   rejectAppealSchema,
   appealIdSchema,
-  paginationSchema
+  paginationSchema,
+  idParamSchema,
+  postIdParamSchema,
+  userIdParamSchema,
+  conversationIdParamSchema,
+  messageIdParamSchema,
+  usernameParamSchema
 };

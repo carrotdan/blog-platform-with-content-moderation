@@ -36,7 +36,7 @@ class PostController {
         title: title || 'No Title', // Fallback
         content_html: sanitizedHtml,
         content_json: content_json ? JSON.parse(content_json) : { text: req.body.content || '' },
-        tags: tags ? tags.split(',') : [],
+        tags: Array.isArray(tags) ? tags : (typeof tags === 'string' && tags ? tags.split(',') : []),
         visibility: visibility || 'PUBLIC',
         media: uploadedMedia
       };
