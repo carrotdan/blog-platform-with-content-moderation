@@ -3,9 +3,9 @@ const router = express.Router();
 const appealController = require('../controllers/appeal.controller');
 const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
-const { createAppealSchema, appealIdSchema } = require('../validators/schemas');
+const { appealSchema, appealIdSchema } = require('../validators/schemas');
 
-router.post('/', authenticate, checkStatus, validate(createAppealSchema), appealController.createAppeal);
+router.post('/', authenticate, checkStatus, validate(appealSchema), appealController.createAppeal);
 router.get('/my', authenticate, checkStatus, appealController.getMyAppeals);
 router.get('/pending', authenticate, checkStatus, authorize('ADMIN'), appealController.getPendingAppeals);
 router.get('/all', authenticate, checkStatus, authorize('ADMIN'), appealController.getAllAppeals);

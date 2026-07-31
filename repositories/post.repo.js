@@ -35,8 +35,15 @@ class PostRepository {
     return Post.findByIdAndDelete(id);
   }
 
-  async findByAuthor(authorId, skip = 0, limit = 10) {
-    return Post.find({ author: authorId })
+  async findByAuthor(authorId, skip = 0, limit = 10, options = {}) {
+    const query = { author: authorId };
+    // C22: Public views only expose PUBLIC/PUBLISHED posts; the author's own
+    // view (getMyPosts / visiting your own profile) may include all.
+    if (!options.includeAll) {
+      query.visibility = 'PUBLIC';
+      query.status = 'PUBLISHED';
+    }
+    return Post.find(query)
       .populate(getAuthorPopulate())
       .populate(getOriginalPostPopulate())
       .skip(skip)

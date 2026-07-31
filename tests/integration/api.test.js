@@ -523,3 +523,191 @@ describe('Sprint 11 fixes (M16-M31, L17-L26)', () => {
   });
 });
 
+describe('Sprint 12 fixes (C20-C25)', () => {
+  let userAToken;
+  let userAId;
+
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  const createFlaggedPost = async (token, content, label = 'SPAM') => {
+    const aiService = require('../../services/ai.service');
+    aiService.analyze.mockResolvedValueOnce({
+      spam_score: label === 'SPAM' ? 0.9 : 0.1,
+      toxicity_score: label === 'TOXIC' ? 0.9 : 0.1,
+      label
+    });
+    const res = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: `<p>${content}</p>` });
+    return res;
+  };
+
+  beforeAll(async () => {
+    const userA = await createUser('sprint12a@example.com', 'sprint12a');
+    userAToken = mintToken(userA._id.toString());
+    userAId = userA._id.toString();
+  });
+
+  test('C23: createPost persists the AI moderation result', async () => {
+    const res = await createFlaggedPost(userAToken, 'flagged spam', 'SPAM');
+    expect(res.status).toBe(201);
+    expect(res.body.data.label).toBe('SPAM');
+    expect(res.body.data.spam_score).toBe(0.9);
+    expect(res.body.data.visibility).toBe('HIDDEN');
+  });
+
+  test('C21: a PRIVATE post is not readable by other users', async () => {
+    const Post = mongoose.model('Post');
+    const privatePost = await Post.create({
+      author: userAId,
+      slug: `sprint12-private-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>secret</p>',
+      visibility: 'PRIVATE',
+      status: 'PUBLISHED'
+    });
+    const other = await createUser('sprint12b@example.com', 'sprint12b');
+    const otherToken = mintToken(other._id.toString());
+
+    const otherRes = await request(app)
+      .get(`/api/v1/posts/${privatePost._id.toString()}`)
+      .set('Authorization', `Bearer ${otherToken}`);
+    expect(otherRes.status).toBe(404);
+
+    const ownerRes = await request(app)
+      .get(`/api/v1/posts/${privatePost._id.toString()}`)
+      .set('Authorization', `Bearer ${userAToken}`);
+    expect(ownerRes.status).toBe(200);
+  });
+
+  test('C22: public profile only exposes PUBLIC posts', async () => {
+    const Post = mongoose.model('Post');
+    await Post.create({
+      author: userAId,
+      slug: `sprint12-pub-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>public</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+    await Post.create({
+      author: userAId,
+      slug: `sprint12-priv-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>private</p>',
+      visibility: 'PRIVATE',
+      status: 'PUBLISHED'
+    });
+    await Post.create({
+      author: userAId,
+      slug: `sprint12-hid-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>hidden</p>',
+      visibility: 'HIDDEN',
+      status: 'PUBLISHED'
+    });
+
+    const res = await request(app).get('/api/v1/users/sprint12a');
+    expect(res.status).toBe(200);
+    expect(res.body.data.posts.length).toBeGreaterThan(0);
+    expect(res.body.data.posts.every(p => p.visibility === 'PUBLIC')).toBe(true);
+  });
+
+  test('C24: a user cannot appeal another user content', async () => {
+    const owner = await createUser('sprint12owner@example.com', 'sprint12owner');
+    const ownerToken = mintToken(owner._id.toString());
+
+    const flagged = await createFlaggedPost(ownerToken, 'owners spam', 'SPAM');
+    expect(flagged.status).toBe(201);
+    const flaggedPostId = flagged.body.data._id;
+
+    const res = await request(app)
+      .post('/api/v1/appeals')
+      .set('Authorization', `Bearer ${userAToken}`)
+      .send({ target_id: flaggedPostId, target_model: 'Post', reason: 'not mine' });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/own content/i);
+  });
+
+  test('C20+C24: owner appeal is created with server-derived label and approval succeeds', async () => {
+    const owner = await createUser('sprint12owner2@example.com', 'sprint12owner2');
+    const ownerToken = mintToken(owner._id.toString());
+
+    const flagged = await createFlaggedPost(ownerToken, 'appeal me', 'SPAM');
+    const flaggedPostId = flagged.body.data._id;
+
+    // Attacker-supplied ai_label is ignored -> server derives SPAM from the queue
+    const appealRes = await request(app)
+      .post('/api/v1/appeals')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        target_id: flaggedPostId,
+        target_model: 'Post',
+        reason: 'it is not spam',
+        ai_label: 'TOXIC',
+        ai_spam_score: 0,
+        ai_toxicity_score: 1
+      });
+    expect(appealRes.status).toBe(201);
+    expect(appealRes.body.data.ai_label).toBe('SPAM');
+    expect(appealRes.body.data.ai_spam_score).toBe(0.9);
+    const appealId = appealRes.body.data._id;
+
+    // C20: approval no longer crashes (UNHIDE now in ModerationLog.action enum)
+    const adminToken = mintToken(owner._id.toString(), 'ADMIN');
+    const approveRes = await request(app)
+      .put(`/api/v1/appeals/${appealId}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ admin_note: 'ok' });
+    expect(approveRes.status).toBe(200);
+    expect(approveRes.body.data.status).toBe('APPROVED');
+
+    // Content is restored to PUBLIC
+    const postRes = await request(app)
+      .get(`/api/v1/posts/${flaggedPostId}`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(postRes.status).toBe(200);
+    expect(postRes.body.data.visibility).toBe('PUBLIC');
+  });
+
+  test('C25: admin user listing does not leak refresh tokens', async () => {
+    const User = mongoose.model('User');
+    const victim = await createUser('sprint12victim@example.com', 'sprint12victim');
+
+    // Give the victim a stored refresh token (simulates a login session)
+    const crypto = require('crypto');
+    victim.refreshTokens = [{
+      tokenHash: crypto.createHash('sha256').update('fake-token').digest('hex'),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    }];
+    await victim.save();
+
+    const adminToken = mintToken(victim._id.toString(), 'ADMIN');
+    const res = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    res.body.data.forEach(u => {
+      expect(u.refreshTokens).toBeUndefined();
+      expect(u.password).toBeUndefined();
+    });
+  });
+});
+

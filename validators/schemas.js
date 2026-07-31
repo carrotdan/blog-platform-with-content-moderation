@@ -124,10 +124,7 @@ const appealSchema = z.object({
   body: z.object({
     target_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid target ID'),
     target_model: z.enum(['Post', 'Comment']),
-    reason: z.string().min(1, 'Reason is required').max(500),
-    ai_label: z.enum(['SPAM', 'TOXIC', 'AI_UNAVAILABLE']),
-    ai_spam_score: z.number().min(0).max(1).optional(),
-    ai_toxicity_score: z.number().min(0).max(1).optional()
+    reason: z.string().min(1, 'Reason is required').max(500)
   })
 });
 

@@ -36,7 +36,12 @@ class PostService {
       // H25: Posts are created published (DRAFT state machine is not exposed via API)
       status: 'PUBLISHED',
       // Hide completely if AI flags as SPAM, TOXIC, or AI_UNAVAILABLE — wait for admin review
-      visibility: isFlagged ? 'HIDDEN' : (data.visibility || 'PUBLIC')
+      visibility: isFlagged ? 'HIDDEN' : (data.visibility || 'PUBLIC'),
+      // C23: Persist the AI moderation result on the post itself (was silently
+      // dropped by the create path, so every post stored the default NORMAL).
+      spam_score,
+      toxicity_score,
+      label
     };
 
     const newPost = await postRepository.create(postData);
@@ -215,8 +220,10 @@ class PostService {
     const post = await postRepository.findById(id);
     if (!post) return null;
     
-    // Allow author to see their own hidden posts
-    if (post.visibility === 'HIDDEN' && post.author._id.toString() !== current_user_id) {
+    // C21: Only the author may view their own non-PUBLIC posts (PRIVATE/HIDDEN);
+    // everyone else only sees PUBLIC posts.
+    const isOwner = current_user_id && post.author._id.toString() === current_user_id.toString();
+    if (post.visibility !== 'PUBLIC' && !isOwner) {
       return null;
     }
     
@@ -238,8 +245,10 @@ class PostService {
     const post = await postRepository.findBySlug(slug);
     if (!post) return null;
     
-    // Allow author to see their own hidden posts
-    if (post.visibility === 'HIDDEN' && post.author._id.toString() !== current_user_id) {
+    // C21: Only the author may view their own non-PUBLIC posts (PRIVATE/HIDDEN);
+    // everyone else only sees PUBLIC posts.
+    const isOwner = current_user_id && post.author._id.toString() === current_user_id.toString();
+    if (post.visibility !== 'PUBLIC' && !isOwner) {
       return null;
     }
     
@@ -366,7 +375,7 @@ async updatePost(id, data, user_id) {
   }
 
   async getMyPosts(user_id, skip = 0, limit = 10) {
-    const posts = await postRepository.findByAuthor(user_id, skip, limit);
+    const posts = await postRepository.findByAuthor(user_id, skip, limit, { includeAll: true });
     return this._enrichPosts(posts, user_id);
   }
 
@@ -375,7 +384,9 @@ async updatePost(id, data, user_id) {
   }
 
   async getPostsByUser(user_id, current_user_id = null, skip = 0, limit = 10) {
-    const posts = await postRepository.findByAuthor(user_id, skip, limit);
+    // C22: The profile owner sees all their posts; everyone else only gets PUBLIC ones.
+    const isOwner = current_user_id && current_user_id.toString() === user_id.toString();
+    const posts = await postRepository.findByAuthor(user_id, skip, limit, { includeAll: !!isOwner });
     return this._enrichPosts(posts, current_user_id);
   }
 

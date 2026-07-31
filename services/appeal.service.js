@@ -7,26 +7,29 @@ const notificationService = require('./notification.service');
 const { getStatusFromScore, getDeltasFromLabel, isViolationLabel } = require('../utils/violation');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
+const ModerationQueue = require('../models/ModerationQueue');
 
 class AppealService {
+  _throw(message, statusCode = 400) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    throw error;
+  }
+
   async createAppeal(user_id, data) {
-    const { target_id, target_model, reason, ai_label, ai_spam_score, ai_toxicity_score } = data;
+    const { target_id, target_model, reason } = data;
 
     if (!target_id || !target_model || !reason) {
-      throw new Error('Missing required fields: target_id, target_model, reason');
+      this._throw('Missing required fields: target_id, target_model, reason');
     }
 
     if (!['Post', 'Comment'].includes(target_model)) {
-      throw new Error('Invalid target_model (only Post or Comment)');
-    }
-
-    if (!['SPAM', 'TOXIC', 'AI_UNAVAILABLE'].includes(ai_label)) {
-      throw new Error('Invalid ai_label (only SPAM, TOXIC, AI_UNAVAILABLE)');
+      this._throw('Invalid target_model (only Post or Comment)');
     }
 
     const existing = await appealRepository.findExisting(user_id, target_id);
     if (existing) {
-      throw new Error('You have already appealed this content and it is pending review');
+      this._throw('You have already appealed this content and it is pending review');
     }
 
     const target = target_model === 'Post'
@@ -34,15 +37,28 @@ class AppealService {
       : await commentRepository.findById(target_id);
 
     if (!target) {
-      throw new Error('Content not found');
+      this._throw('Content not found', 404);
+    }
+
+    // C24: Only the author of the flagged content may appeal it. Without this,
+    // any user could appeal (and later reverse the penalties of) any content.
+    const targetAuthor = target.author?._id || target.author;
+    if (!targetAuthor || targetAuthor.toString() !== user_id.toString()) {
+      this._throw('You can only appeal your own content', 403);
     }
 
     if (target_model === 'Post' && target.visibility !== 'HIDDEN') {
-      throw new Error('Can only appeal hidden posts');
+      this._throw('Can only appeal hidden posts');
     }
     if (target_model === 'Comment' && !target.is_hidden) {
-      throw new Error('Can only appeal hidden comments');
+      this._throw('Can only appeal hidden comments');
     }
+
+    // C24: Never trust client-supplied ai_label/scores — resolve the real
+    // moderation flag from the queue (or the target's persisted label) so an
+    // approval reverses exactly the penalty that was actually applied.
+    const { ai_label, ai_spam_score, ai_toxicity_score } =
+      await this._resolveModerationFlag(target_id, target_model, target);
 
     const appeal = await appealRepository.create({
       user_id,
@@ -50,11 +66,37 @@ class AppealService {
       target_model,
       reason,
       ai_label,
-      ai_spam_score: ai_spam_score || 0,
-      ai_toxicity_score: ai_toxicity_score || 0
+      ai_spam_score,
+      ai_toxicity_score
     });
 
     return appeal;
+  }
+
+  async _resolveModerationFlag(target_id, target_model, target) {
+    const queueItem = await ModerationQueue.findOne({ target_id, target_model })
+      .sort({ createdAt: -1 })
+      .select('target_type spam_score toxicity_score')
+      .lean();
+
+    if (queueItem && ['SPAM', 'TOXIC', 'AI_UNAVAILABLE'].includes(queueItem.target_type)) {
+      return {
+        ai_label: queueItem.target_type,
+        ai_spam_score: queueItem.spam_score || 0,
+        ai_toxicity_score: queueItem.toxicity_score || 0
+      };
+    }
+
+    const persistedLabel = target.label;
+    if (['SPAM', 'TOXIC', 'AI_UNAVAILABLE'].includes(persistedLabel)) {
+      return {
+        ai_label: persistedLabel,
+        ai_spam_score: target.spam_score || 0,
+        ai_toxicity_score: target.toxicity_score || 0
+      };
+    }
+
+    this._throw('This content has no moderation flag to appeal');
   }
 
   async getUserAppeals(user_id) {

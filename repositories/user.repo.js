@@ -6,23 +6,23 @@ class UserRepository {
   }
 
   async findByEmail(email) {
-    return User.findOne({ email, isDeleted: false }).select('-password');
+    return User.findOne({ email, isDeleted: false }).select('-password -refreshTokens');
   }
 
   async findById(id) {
-    return User.findOne({ _id: id, isDeleted: false }).select('-password');
+    return User.findOne({ _id: id, isDeleted: false }).select('-password -refreshTokens');
   }
 
   async findByUsername(username) {
-    return User.findOne({ username, isDeleted: false }).select('-password');
+    return User.findOne({ username, isDeleted: false }).select('-password -refreshTokens');
   }
 
   async update(id, updateData) {
-    return User.findByIdAndUpdate(id, updateData, { new: true }).select('-password');
+    return User.findByIdAndUpdate(id, updateData, { new: true }).select('-password -refreshTokens');
   }
 
   async findAll(query = {}) {
-    return User.find(query).select('-password');
+    return User.find(query).select('-password -refreshTokens');
   }
 
   async incrementViolations(userId, spamDelta = 0, toxicDelta = 0) {
@@ -36,7 +36,7 @@ class UserRepository {
         }
       },
       { new: true }
-    ).select('-password');
+    ).select('-password -refreshTokens');
   }
 
   async decrementViolations(userId, spamDelta = 0, toxicDelta = 0) {
@@ -50,7 +50,7 @@ class UserRepository {
         }
       },
       { new: true }
-    ).select('-password');
+    ).select('-password -refreshTokens');
   }
 }
 
