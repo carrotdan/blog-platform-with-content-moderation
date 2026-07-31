@@ -59,7 +59,16 @@ class PostController {
         media: uploadedMedia
       };
 
-      const post = await postService.createPost(req.user.id, postData);
+      let post;
+      try {
+        post = await postService.createPost(req.user.id, postData);
+      } catch (error) {
+        // C27: creation failed AFTER a successful upload (DB error, AI failure,
+        // etc.) — destroy the media uploaded for this request so nothing is
+        // orphaned. H41 only handled upload-phase failures.
+        await destroyAssets(uploadedMedia.map(m => m.public_id));
+        throw error;
+      }
       
       // M17: Socket.io is registered on the socket.service module, not via
       // app.set('io'). Use getIO() so the real-time event actually fires.

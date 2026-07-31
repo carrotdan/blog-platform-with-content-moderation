@@ -39,11 +39,11 @@ class MessageController {
     try {
       const { recipientId, content } = req.body;
       let media = [];
+      const uploadedPublicIds = [];
       
       if (req.files && req.files.length > 0) {
         const { uploadToCloudinary, destroyAssets } = require('../services/cloudinary.service');
         const uploaded = [];
-        const uploadedPublicIds = [];
         try {
           // H41: upload sequentially and track public_ids so a partial failure
           // cleans up already-uploaded assets (no orphaned media).
@@ -63,8 +63,19 @@ class MessageController {
         }
       }
 
-      const message = await messageService.sendMessage(req.user.id, recipientId, content, media);
-      res.status(201).json({ success: true, data: message });
+      try {
+        const message = await messageService.sendMessage(req.user.id, recipientId, content, media);
+        return res.status(201).json({ success: true, data: message });
+      } catch (error) {
+        // C27: sendMessage failed AFTER a successful upload (DB error, validation,
+        // etc.) — destroy the media uploaded for this request so nothing is
+        // orphaned. H41 only handled upload-phase failures.
+        if (uploadedPublicIds.length > 0) {
+          const { destroyAssets } = require('../services/cloudinary.service');
+          await destroyAssets(uploadedPublicIds);
+        }
+        throw error;
+      }
     } catch (error) {
       next(error);
     }

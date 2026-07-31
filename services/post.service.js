@@ -118,6 +118,14 @@ class PostService {
 
     const originalPost = await postRepository.findById(original_post_id);
     if (!originalPost) throw new Error('Original post not found');
+    // C26: only PUBLIC source posts may be reposted. A HIDDEN post (AI-flagged
+    // or moderated) must never be re-exposed via a repost, and we treat it as
+    // not found (404) so its very existence isn't leaked. PRIVATE stays blocked.
+    if (originalPost.visibility === 'HIDDEN') {
+      const err = new Error('Original post not found');
+      err.statusCode = 404;
+      throw err;
+    }
     if (originalPost.visibility === 'PRIVATE') throw new Error('Cannot repost a private post');
     if (originalPost.author._id.toString() === user_id.toString()) throw new Error('Cannot repost your own post');
     

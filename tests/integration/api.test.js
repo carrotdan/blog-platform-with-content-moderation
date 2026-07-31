@@ -1382,3 +1382,75 @@ describe('Sprint 15 fixes (L27-L32)', () => {
   });
 });
 
+describe('Sprint 16 fixes (C26-C27)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  test('C26: reposting a HIDDEN post is rejected with 404 and creates no repost', async () => {
+    const author = await createUser('c26a@example.com', 'c26a');
+    const reposter = await createUser('c26b@example.com', 'c26b');
+    const reposterToken = mintToken(reposter._id.toString());
+    const Post = mongoose.model('Post');
+
+    // A HIDDEN (AI-flagged / moderated) post whose id the attacker has obtained
+    const hidden = await Post.create({
+      author: author._id,
+      slug: `c26-hidden-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>hidden toxic content</p>',
+      visibility: 'HIDDEN',
+      status: 'PUBLISHED'
+    });
+
+    const res = await request(app)
+      .post(`/api/v1/posts/${hidden._id.toString()}/repost`)
+      .set('Authorization', `Bearer ${reposterToken}`)
+      .send({});
+    expect(res.status).toBe(404);
+
+    // No repost row may reference the hidden post
+    const repostCount = await Post.countDocuments({
+      original_post: hidden._id,
+      author: reposter._id
+    });
+    expect(repostCount).toBe(0);
+  });
+
+  test('C26: a PUBLIC post can still be reposted normally', async () => {
+    const author = await createUser('c26c@example.com', 'c26c');
+    const reposter = await createUser('c26d@example.com', 'c26d');
+    const reposterToken = mintToken(reposter._id.toString());
+    const Post = mongoose.model('Post');
+
+    const pub = await Post.create({
+      author: author._id,
+      slug: `c26-public-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>public post</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+
+    const res = await request(app)
+      .post(`/api/v1/posts/${pub._id.toString()}/repost`)
+      .set('Authorization', `Bearer ${reposterToken}`)
+      .send({});
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+  });
+});
+
