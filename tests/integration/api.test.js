@@ -955,3 +955,282 @@ describe('Sprint 13 fixes (H31-H41)', () => {
   });
 });
 
+describe('Sprint 14 fixes (M32-M42)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  const createFlaggedPost = async (token, content, label = 'SPAM') => {
+    const aiService = require('../../services/ai.service');
+    aiService.analyze.mockResolvedValueOnce({
+      spam_score: label === 'SPAM' ? 0.9 : 0.1,
+      toxicity_score: label === 'TOXIC' ? 0.9 : 0.1,
+      label
+    });
+    const res = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: `<p>${content}</p>` });
+    return res;
+  };
+
+  test('M32: guest feed window cannot reach beyond the first 5 posts', async () => {
+    const owner = await createUser('m32@example.com', 'm32user');
+    const token = mintToken(owner._id.toString());
+    for (let i = 0; i < 7; i++) {
+      const res = await request(app)
+        .post('/api/v1/posts')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ content_html: `<p>m32 post ${i}</p>` });
+      expect(res.status).toBe(201);
+    }
+
+    // skip=5&limit=5 used to return posts at index 5-9 (bypassing the cap)
+    const res = await request(app).get('/api/v1/posts?skip=5&limit=5');
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(0);
+    expect(res.body.meta.isLimited).toBe(true);
+    expect(res.body.meta.total).toBeLessThanOrEqual(5);
+
+    // a window straddling the cap is truncated to stay within the first 5
+    const straddle = await request(app).get('/api/v1/posts?skip=3&limit=5');
+    expect(straddle.status).toBe(200);
+    expect(straddle.body.data.length).toBeLessThanOrEqual(2);
+    expect(straddle.body.meta.limit).toBe(2);
+  });
+
+  test('M33: guest profile posts are capped to the first 3 regardless of skip', async () => {
+    const owner = await createUser('m33@example.com', 'm33user');
+    const token = mintToken(owner._id.toString());
+    for (let i = 0; i < 5; i++) {
+      await request(app)
+        .post('/api/v1/posts')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ content_html: `<p>m33 post ${i}</p>` });
+    }
+
+    // arbitrary skip used to enumerate every post via slice() after the query
+    const res = await request(app).get('/api/v1/users/m33user?skip=100&limit=20');
+    expect(res.status).toBe(200);
+    expect(res.body.data.posts.length).toBeLessThanOrEqual(3);
+    expect(res.body.data.meta.isLimited).toBe(true);
+  });
+
+  test('M34: stored refresh-token expiry follows JWT_REFRESH_EXPIRE', async () => {
+    const authService = require('../../services/auth.service');
+    const User = mongoose.model('User');
+    const user = await createUser('m34@example.com', 'm34user');
+
+    const original = process.env.JWT_REFRESH_EXPIRE;
+    process.env.JWT_REFRESH_EXPIRE = '1d';
+    try {
+      await authService.login('m34@example.com', 'password123');
+      const fresh = await User.findOne({ email: 'm34@example.com' }).select('+refreshTokens');
+      const stored = fresh.refreshTokens[fresh.refreshTokens.length - 1];
+      const diffMs = stored.expiresAt.getTime() - Date.now();
+      expect(diffMs).toBeGreaterThan(23 * 60 * 60 * 1000);
+      expect(diffMs).toBeLessThan(25 * 60 * 60 * 1000);
+    } finally {
+      if (original !== undefined) process.env.JWT_REFRESH_EXPIRE = original;
+      else delete process.env.JWT_REFRESH_EXPIRE;
+    }
+  });
+
+  test('M35: register/login treat emails case-insensitively', async () => {
+    const authService = require('../../services/auth.service');
+    const User = mongoose.model('User');
+
+    await authService.register({ email: '  MixedCase@Example.com ', password: 'password123', username: 'm35user' });
+
+    // login with a differently-cased/padded email resolves to the same account
+    const result = await authService.login('mixedcase@example.com', 'password123');
+    expect(result.user.email).toBe('mixedcase@example.com');
+
+    // only one account was created
+    const count = await User.countDocuments({ email: 'mixedcase@example.com' });
+    expect(count).toBe(1);
+  });
+
+  test('M36: usernames are restricted to [a-zA-Z0-9_]', async () => {
+    const { registerSchema, updateProfileSchema } = require('../../validators/schemas');
+
+    // register route schema rejects hostile usernames
+    expect(registerSchema.safeParse({ body: { email: 'a@b.com', password: 'password123', username: '<img src=x onerror=alert(1)>' } }).success).toBe(false);
+    expect(registerSchema.safeParse({ body: { email: 'a@b.com', password: 'password123', username: 'valid_name' } }).success).toBe(true);
+    expect(updateProfileSchema.safeParse({ body: { username: 'bad user!' } }).success).toBe(false);
+
+    // profile update endpoint (no rate limiter) enforces it too
+    const user = await createUser('m36@example.com', 'm36user');
+    const token = mintToken(user._id.toString());
+    const res = await request(app)
+      .put('/api/v1/users/profile')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ username: '<script>alert(1)</script>' });
+    expect(res.status).toBe(400);
+  });
+
+  test('M37: deleting a post cascades comments, interactions, queue, reports, appeals', async () => {
+    const owner = await createUser('m37a@example.com', 'm37a');
+    const other = await createUser('m37b@example.com', 'm37b');
+    const token = mintToken(owner._id.toString());
+    const otherToken = mintToken(other._id.toString());
+
+    const created = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ content_html: '<p>m37 post</p>' });
+    const postId = created.body.data._id;
+
+    const commentRes = await request(app)
+      .post('/api/v1/comments')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ post_id: postId, content: 'a comment' });
+    expect(commentRes.status).toBe(201);
+    const commentId = commentRes.body.data._id;
+
+    await request(app)
+      .post('/api/v1/interactions')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ target_id: postId, target_model: 'Post', type: 'LIKE' });
+
+    const reportRes = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ target_id: postId, target_model: 'Post', reason: 'spam' });
+    expect(reportRes.status).toBe(201);
+
+    const ModerationQueue = mongoose.model('ModerationQueue');
+    const Appeal = mongoose.model('Appeal');
+    await ModerationQueue.create({ target_id: postId, target_model: 'Post', target_type: 'SPAM', reason: 'x', status: 'PENDING' });
+    await Appeal.create({ user_id: owner._id, target_id: postId, target_model: 'Post', ai_label: 'SPAM', reason: 'not spam', status: 'PENDING' });
+
+    const del = await request(app)
+      .delete(`/api/v1/posts/${postId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(200);
+
+    const Post = mongoose.model('Post');
+    const Comment = mongoose.model('Comment');
+    const Interaction = mongoose.model('Interaction');
+    const Report = mongoose.model('Report');
+
+    expect(await Post.findById(postId)).toBeNull();
+    expect(await Comment.countDocuments({ post_id: postId })).toBe(0);
+    expect(await Interaction.countDocuments({ target_model: 'Post', target_id: postId })).toBe(0);
+    expect(await Interaction.countDocuments({ target_model: 'Comment', target_id: commentId })).toBe(0);
+    expect(await ModerationQueue.countDocuments({ target_model: 'Post', target_id: postId })).toBe(0);
+    expect(await Report.countDocuments({ target_model: 'Post', target_id: postId })).toBe(0);
+    expect(await Appeal.countDocuments({ target_model: 'Post', target_id: postId })).toBe(0);
+  });
+
+  test('M38: report validates target existence and blocks self/duplicate reports', async () => {
+    const owner = await createUser('m38a@example.com', 'm38a');
+    const other = await createUser('m38b@example.com', 'm38b');
+    const ownerToken = mintToken(owner._id.toString());
+    const otherToken = mintToken(other._id.toString());
+
+    const missing = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ target_id: '000000000000000000000000', target_model: 'Post', reason: 'x' });
+    expect(missing.status).toBe(404);
+
+    const ownPost = await request(app)
+      .post('/api/v1/posts')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ content_html: '<p>m38 own</p>' });
+    const self = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ target_id: ownPost.body.data._id, target_model: 'Post', reason: 'myself' });
+    expect(self.status).toBe(400);
+
+    const first = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ target_id: ownPost.body.data._id, target_model: 'Post', reason: 'first' });
+    expect(first.status).toBe(201);
+
+    const dup = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ target_id: ownPost.body.data._id, target_model: 'Post', reason: 'second' });
+    expect(dup.status).toBe(400);
+  });
+
+  test('M39: cannot follow a non-existent user', async () => {
+    const user = await createUser('m39@example.com', 'm39user');
+    const token = mintToken(user._id.toString());
+    const res = await request(app)
+      .post('/api/v1/follows')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ following_id: '000000000000000000000000' });
+    expect(res.status).toBe(404);
+  });
+
+  test('M40: an empty message is rejected', async () => {
+    const a = await createUser('m40a@example.com', 'm40a');
+    const b = await createUser('m40b@example.com', 'm40b');
+    const tokenA = mintToken(a._id.toString());
+
+    const res = await request(app)
+      .post('/api/v1/messages/send')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recipientId: b._id.toString(), content: '   ' });
+    expect(res.status).toBe(400);
+  });
+
+  test('M41: moderation queue populates targets in batch', async () => {
+    const owner = await createUser('m41@example.com', 'm41user');
+    const modToken = mintToken(owner._id.toString(), 'MODERATOR');
+
+    const flagged1 = await createFlaggedPost(modToken, 'm41 spam one', 'SPAM');
+    const flagged2 = await createFlaggedPost(modToken, 'm41 spam two', 'SPAM');
+    expect(flagged1.status).toBe(201);
+    expect(flagged2.status).toBe(201);
+
+    const res = await request(app)
+      .get('/api/v1/moderation/queue')
+      .set('Authorization', `Bearer ${modToken}`);
+    expect(res.status).toBe(200);
+    const populatedIds = new Set(
+      res.body.data.filter(i => i.target_id && i.target_id._id).map(i => i.target_id._id.toString())
+    );
+    expect(populatedIds.has(flagged1.body.data._id)).toBe(true);
+    expect(populatedIds.has(flagged2.body.data._id)).toBe(true);
+  });
+
+  test('M42: admin user/violation listings are paginated', async () => {
+    const admin = await createUser('m42admin@example.com', 'm42admin');
+    const adminToken = mintToken(admin._id.toString(), 'ADMIN');
+
+    const usersRes = await request(app)
+      .get('/api/v1/admin/users?skip=0&limit=1')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(usersRes.status).toBe(200);
+    expect(usersRes.body.data.length).toBeLessThanOrEqual(1);
+    expect(typeof usersRes.body.meta.total).toBe('number');
+    expect(usersRes.body.meta.limit).toBe(1);
+
+    const violRes = await request(app)
+      .get('/api/v1/admin/violations?skip=0&limit=1')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(violRes.status).toBe(200);
+    expect(violRes.body.data.length).toBeLessThanOrEqual(1);
+    expect(typeof violRes.body.meta.total).toBe('number');
+  });
+});
+

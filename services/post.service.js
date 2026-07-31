@@ -383,8 +383,64 @@ async updatePost(id, data, user_id) {
       const { destroyAssets } = require('./cloudinary.service');
       const publicIds = (deleted.media || []).map(m => m.public_id);
       await destroyAssets(publicIds);
+      // M37: cascade the dependent records (comments, reposts, interactions,
+      // moderation-queue items, reports, appeals) so no dangling references remain.
+      await this.cascadeDeletePost(id);
     }
     return deleted;
+  }
+
+  // M37: remove every record that references the post so deleting a post cannot
+  // leave orphaned comments/reposts/queue items/reports/appeals behind. Reposts
+  // are posts themselves, so they are cascaded recursively (including their own
+  // media and dependents).
+  async cascadeDeletePost(postId) {
+    const Post = require('../models/Post');
+    const Comment = require('../models/Comment');
+    const Interaction = require('../models/Interaction');
+    const ModerationQueue = require('../models/ModerationQueue');
+    const Report = require('../models/Report');
+    const Appeal = require('../models/Appeal');
+
+    const reposts = await Post.find({ original_post: postId });
+    for (const repost of reposts) {
+      await this.cascadeDeletePost(repost._id);
+      const { destroyAssets } = require('./cloudinary.service');
+      await destroyAssets((repost.media || []).map(m => m.public_id));
+    }
+
+    const comments = await Comment.find({ post_id: postId }).select('_id');
+    const commentIds = comments.map(c => c._id);
+
+    await Interaction.deleteMany({
+      $or: [
+        { target_model: 'Post', target_id: postId },
+        { target_model: 'Comment', target_id: { $in: commentIds } }
+      ]
+    });
+
+    await Comment.deleteMany({ post_id: postId });
+
+    await ModerationQueue.deleteMany({
+      $or: [
+        { target_model: 'Post', target_id: postId },
+        { target_model: 'Comment', target_id: { $in: commentIds } }
+      ]
+    });
+
+    await Report.deleteMany({
+      $or: [
+        { target_model: 'Post', target_id: postId },
+        { target_model: 'Comment', target_id: { $in: commentIds } }
+      ]
+    });
+
+    await Appeal.deleteMany({
+      $or: [
+        { target_model: 'Post', target_id: postId },
+        { target_model: 'Comment', target_id: { $in: commentIds } }
+      ]
+    });
   }
 
   async getMyPosts(user_id, skip = 0, limit = 10) {

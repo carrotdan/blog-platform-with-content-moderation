@@ -4,7 +4,21 @@ const registerSchema = z.object({
   body: z.object({
     email: z.string().email('Invalid email format'),
     password: z.string().min(8, 'Password must be at least 8 characters'),
-    username: z.string().min(3, 'Username must be at least 3 characters').max(30).optional(),
+    // M36: restrict the charset so hostile characters can never be stored (and
+    // later interpolated into socket messages / rendered) as a username.
+    username: z.string().min(3, 'Username must be at least 3 characters').max(30)
+      .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
+      .optional(),
+    avatar: z.string().url('Avatar must be a valid URL').optional(),
+    bio: z.string().max(500, 'Bio must be at most 500 characters').optional()
+  })
+});
+
+const updateProfileSchema = z.object({
+  body: z.object({
+    username: z.string().min(3, 'Username must be at least 3 characters').max(30)
+      .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
+      .optional(),
     avatar: z.string().url('Avatar must be a valid URL').optional(),
     bio: z.string().max(500, 'Bio must be at most 500 characters').optional()
   })
@@ -184,6 +198,15 @@ const conversationMessagesSchema = z.object({
   })
 });
 
+// M40: a message needs a recipient and at least content (media is validated in
+// the service since it may arrive via multipart form fields).
+const sendMessageSchema = z.object({
+  body: z.object({
+    recipientId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid recipient ID'),
+    content: z.string().max(10000).optional()
+  })
+});
+
 const usernameParamSchema = z.object({
   params: z.object({
     username: z.string().min(1, 'Username is required').max(30)
@@ -194,6 +217,7 @@ module.exports = {
   registerSchema,
   loginSchema,
   refreshSchema,
+  updateProfileSchema,
   createPostSchema,
   updatePostSchema,
   repostSchema,
@@ -216,5 +240,6 @@ module.exports = {
   conversationIdParamSchema,
   messageIdParamSchema,
   conversationMessagesSchema,
+  sendMessageSchema,
   usernameParamSchema
 };

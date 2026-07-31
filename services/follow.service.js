@@ -7,6 +7,16 @@ class FollowService {
       throw new Error('You cannot follow yourself');
     }
 
+    // M39: reject follows to non-existent / soft-deleted users (previously a
+    // random valid ObjectId created a Follow row + a notification to a phantom).
+    const User = require('../models/User');
+    const target = await User.findOne({ _id: following_id, isDeleted: false }).select('_id');
+    if (!target) {
+      const err = new Error('User not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
     const existing = await followRepository.findFollow(follower_id, following_id);
     
     if (existing) {

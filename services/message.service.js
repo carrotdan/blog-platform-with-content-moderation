@@ -19,6 +19,14 @@ class MessageService {
   async sendMessage(senderId, recipientId, content, media = []) {
     await this.validateRecipient(senderId, recipientId);
 
+    // M40: a message must carry content or at least one media item — otherwise
+    // an empty message row is persisted.
+    const hasContent = !!(content && String(content).trim());
+    const hasMedia = Array.isArray(media) && media.length > 0;
+    if (!hasContent && !hasMedia) {
+      throw this._httpError('Message content is required', 400);
+    }
+
     const conversation = await conversationRepo.findOrCreate([senderId, recipientId]);
     
     const message = await messageRepo.create({

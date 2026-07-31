@@ -154,15 +154,20 @@ class UserController {
       const isAuthenticated = !!req.user;
       let isLimited = false;
       
-      const skip = Number(req.query.skip) || 0;
-      const limit = Math.min(Number(req.query.limit) || 10, 20);
-      
-      let finalPosts = await postService.getPostsByUser(user._id, req.user?.id, skip, limit);
+      let skip = Number(req.query.skip) || 0;
+      let limit = Math.min(Number(req.query.limit) || 10, 20);
 
-      if (!isAuthenticated && finalPosts.length > 3) {
-        finalPosts = finalPosts.slice(0, 3);
+      if (!isAuthenticated) {
+        // M33: guests only ever see the first 3 posts. The window is capped
+        // BEFORE querying — previously an attacker-controlled skip was applied
+        // to the DB query and only the result was slice()d, letting ?skip=100
+        // enumerate every post.
+        skip = 0;
+        limit = Math.min(limit, 3);
         isLimited = true;
       }
+      
+      const finalPosts = await postService.getPostsByUser(user._id, req.user?.id, skip, limit);
 
       const [followStats, isFollowing] = await Promise.all([
         followService.getFollowStats(user._id),

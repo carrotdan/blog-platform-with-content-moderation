@@ -21,8 +21,18 @@ class UserRepository {
     return User.findByIdAndUpdate(id, updateData, { new: true }).select('-password -refreshTokens');
   }
 
-  async findAll(query = {}) {
-    return User.find(query).select('-password -refreshTokens');
+  async findAll(query = {}, options = {}) {
+    const { skip = 0, limit = 0, sort = {} } = options;
+    return User.find(query)
+      .select('-password -refreshTokens')
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .lean();
+  }
+
+  async countAll(query = {}) {
+    return User.countDocuments(query);
   }
 
   async incrementViolations(userId, spamDelta = 0, toxicDelta = 0) {

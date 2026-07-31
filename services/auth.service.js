@@ -15,8 +15,31 @@ class AuthService {
     user.refreshTokens = user.refreshTokens.filter(rt => rt.expiresAt > now);
   }
 
+  // M34: stored refresh-token lifetime must match the configured
+  // JWT_REFRESH_EXPIRE (jsonwebtoken accepts seconds or '<n>d/h/m/s' strings).
+  parseDurationToMs(value, fallbackMs) {
+    if (typeof value === 'number') return value * 1000;
+    const match = String(value).trim().match(/^(\d+)([smhd])$/);
+    if (!match) return fallbackMs;
+    const n = parseInt(match[1], 10);
+    const unitMs = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
+    return n * unitMs[match[2]];
+  }
+
+  refreshTokenExpiresAt() {
+    const ms = this.parseDurationToMs(process.env.JWT_REFRESH_EXPIRE, 7 * 24 * 60 * 60 * 1000);
+    return new Date(Date.now() + ms);
+  }
+
+  // M35: emails are identity case-insensitive — normalize on register/login so
+  // User@Example.com and user@example.com are the same account.
+  normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
   async register(data) {
-    const { email, password, avatar, bio, username } = data;
+    const { password, avatar, bio, username } = data;
+    const email = this.normalizeEmail(data.email);
     
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -30,9 +53,11 @@ class AuthService {
 
     // Create the new user
     // C14: Always create with USER role. Role changes are only allowed via admin endpoints.
+    // M36: the auto-generated fallback username must respect the allowed charset.
+    const fallbackUsername = (email.split('@')[0] + Math.floor(Math.random() * 10000)).replace(/[^a-zA-Z0-9_]/g, '_');
     const newUser = new User({
       email,
-      username: username || email.split('@')[0] + Math.floor(Math.random() * 10000),
+      username: username || fallbackUsername,
       password: hashedPassword,
       role: 'USER',
       avatar,
@@ -49,8 +74,11 @@ class AuthService {
   }
 
   async login(email, password) {
+    // M35: normalize the email before lookup so case/padding mismatches resolve
+    // to the same account.
+    const normalizedEmail = this.normalizeEmail(email);
     // Find the user by email (password is select:false on the schema, re-include it)
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
     if (!user) {
       throw new Error('Invalid email or password');
     }
@@ -91,7 +119,8 @@ class AuthService {
 
     // Store refresh token hash
     const tokenHash = this.hashToken(refreshToken);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    // M34: derive lifetime from JWT_REFRESH_EXPIRE (was hardcoded to 7 days)
+    const expiresAt = this.refreshTokenExpiresAt();
 
     // M26: Clean expired tokens and cap the stored list (keep most recent 5) to
     // prevent unbounded document growth.
@@ -171,7 +200,8 @@ class AuthService {
 
       // Store new refresh token hash
       const newTokenHash = this.hashToken(newRefreshToken);
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      // M34: derive lifetime from JWT_REFRESH_EXPIRE (was hardcoded to 7 days)
+      const expiresAt = this.refreshTokenExpiresAt();
       user.refreshTokens.push({ tokenHash: newTokenHash, expiresAt });
       // M26: Cap the stored list to the most recent 5 sessions.
       if (user.refreshTokens.length > 5) {

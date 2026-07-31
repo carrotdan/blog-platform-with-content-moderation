@@ -17,17 +17,7 @@ class ModerationRepository {
 
   async getPendingQueue() {
     const items = await ModerationQueue.find({ status: 'PENDING' }).sort({ createdAt: -1 });
-    
-    // Manually populate polymorphic target_id based on target_model
-    for (const item of items) {
-      if (item.target_model === 'Post') {
-        item.target_id = await Post.findById(item.target_id).populate(getAuthorPopulate());
-      } else if (item.target_model === 'Comment') {
-        item.target_id = await Comment.findById(item.target_id).populate(getAuthorPopulate());
-      }
-    }
-    
-    return items;
+    return this._populateTargets(items);
   }
 
   async updateQueueItem(id, data) {
@@ -37,14 +27,36 @@ class ModerationRepository {
   async findQueueItemById(id) {
     const item = await ModerationQueue.findById(id);
     if (!item) return null;
-    
-    if (item.target_model === 'Post') {
-      item.target_id = await Post.findById(item.target_id).populate(getAuthorPopulate());
-    } else if (item.target_model === 'Comment') {
-      item.target_id = await Comment.findById(item.target_id).populate(getAuthorPopulate());
-    }
-    
-    return item;
+    const populated = await this._populateTargets([item]);
+    return populated[0] || null;
+  }
+
+  // M41: populate polymorphic target_id in batch ($in per model) instead of one
+  // awaited query per queue item (N+1). Missing targets resolve to null.
+  async _populateTargets(items) {
+    const postIds = items.filter(i => i.target_model === 'Post').map(i => i.target_id);
+    const commentIds = items.filter(i => i.target_model === 'Comment').map(i => i.target_id);
+
+    const [posts, comments] = await Promise.all([
+      postIds.length
+        ? Post.find({ _id: { $in: postIds } }).populate(getAuthorPopulate())
+        : Promise.resolve([]),
+      commentIds.length
+        ? Comment.find({ _id: { $in: commentIds } }).populate(getAuthorPopulate())
+        : Promise.resolve([])
+    ]);
+
+    const postMap = new Map(posts.map(p => [p._id.toString(), p]));
+    const commentMap = new Map(comments.map(c => [c._id.toString(), c]));
+
+    return items.map(item => {
+      if (item.target_model === 'Post') {
+        item.target_id = postMap.get(item.target_id.toString()) || null;
+      } else if (item.target_model === 'Comment') {
+        item.target_id = commentMap.get(item.target_id.toString()) || null;
+      }
+      return item;
+    });
   }
 
   async createReport(reportData) {

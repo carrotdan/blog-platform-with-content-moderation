@@ -6,11 +6,13 @@ const moderationRepository = require('../repositories/moderation.repo');
 class AdminController {
   async getViolations(req, res, next) {
     try {
-      // Fetch all users using repository
-      const users = await userRepository.findAll();
-      
-      // Sort by violation score descending
-      users.sort((a, b) => (b.violationScore || 0) - (a.violationScore || 0));
+      // M42: paginate instead of loading + sorting the whole users collection.
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const [users, total] = await Promise.all([
+        userRepository.findAll({}, { skip, limit, sort: { violationScore: -1 } }),
+        userRepository.countAll()
+      ]);
 
       // Map to desired response format
       const data = users.map(u => ({
@@ -22,7 +24,7 @@ class AdminController {
         status: u.status || 'ACTIVE'
       }));
 
-      res.status(200).json({ success: true, message: 'Violations retrieved', data });
+      res.status(200).json({ success: true, message: 'Violations retrieved', data, meta: { total, skip, limit } });
     } catch (error) {
       next(error);
     }
@@ -30,8 +32,14 @@ class AdminController {
 
   async getUsers(req, res, next) {
     try {
-      const users = await userRepository.findAll();
-      res.status(200).json({ success: true, message: 'Users retrieved', data: users });
+      // M42: paginate the user listing.
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const [users, total] = await Promise.all([
+        userRepository.findAll({}, { skip, limit, sort: { createdAt: -1 } }),
+        userRepository.countAll()
+      ]);
+      res.status(200).json({ success: true, message: 'Users retrieved', data: users, meta: { total, skip, limit } });
     } catch (error) {
       next(error);
     }
@@ -178,6 +186,10 @@ class AdminController {
       const { destroyAssets } = require('../services/cloudinary.service');
       const publicIds = (post.media || []).map(m => m.public_id);
       await destroyAssets(publicIds);
+      // M37: cascade dependent records (comments, reposts, interactions, queue,
+      // reports, appeals) so no dangling references remain.
+      const postService = require('../services/post.service');
+      await postService.cascadeDeletePost(req.params.id);
       res.status(200).json({ success: true, message: 'Post deleted successfully' });
     } catch (error) {
       next(error);

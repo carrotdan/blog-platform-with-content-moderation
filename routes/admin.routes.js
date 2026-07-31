@@ -3,13 +3,13 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const { authenticate, authorize, checkStatus } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
-const { idParamSchema } = require('../validators/schemas');
+const { idParamSchema, paginationSchema } = require('../validators/schemas');
 
 // Protect all admin routes - allow both ADMIN and MODERATOR, but never banned/muted accounts
 router.use(authenticate, checkStatus, authorize(['ADMIN', 'MODERATOR']));
 
-router.get('/violations', adminController.getViolations);
-router.get('/users', adminController.getUsers);
+router.get('/violations', validate(paginationSchema), adminController.getViolations);
+router.get('/users', validate(paginationSchema), adminController.getUsers);
 // H34: User-management actions (role/ban/mute/reset-score) are ADMIN-only.
 // MODERATORs may review content but must not escalate privileges.
 router.put('/users/:id/role', authorize('ADMIN'), validate(idParamSchema), adminController.changeRole);

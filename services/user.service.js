@@ -44,7 +44,16 @@ class UserService {
     const updateData = {};
     if (data.avatar !== undefined) updateData.avatar = data.avatar;
     if (data.bio !== undefined) updateData.bio = data.bio;
-    if (data.username !== undefined) updateData.username = data.username;
+    if (data.username !== undefined) {
+      // M36: defense-in-depth — reject usernames outside the allowed charset
+      // even if a caller bypasses route validation.
+      if (!/^[a-zA-Z0-9_]+$/.test(data.username) || data.username.length < 3 || data.username.length > 30) {
+        const err = new Error('Username can only contain letters, numbers, and underscores (3-30 chars)');
+        err.statusCode = 400;
+        throw err;
+      }
+      updateData.username = data.username;
+    }
     
     return userRepository.update(user_id, updateData);
   }

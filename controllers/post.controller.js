@@ -125,22 +125,32 @@ class PostController {
       let isLimited = false;
       let maxPosts = 0;
 
-      if (!isAuthenticated) {
-        // Guests: allow pagination within first 5 posts
-        limit = Math.min(Number(limit) || 5, 5);
-        skip = Math.min(Number(skip) || 0, 5); // Cap skip at 5
-        isLimited = true;
-        maxPosts = 5;
-      } else {
-        limit = Number(limit) || 10;
-        skip = Number(skip) || 0;
-      }
-
       if (tag) {
         const tagsArray = tag.split(',').filter(t => t.trim());
         if (tagsArray.length > 0) {
           query.tags = { $in: tagsArray };
         }
+      }
+
+      skip = Number(skip) || 0;
+      limit = Number(limit) || 10;
+
+      if (!isAuthenticated) {
+        // M32: guests may only page within the first 5 posts. Previously each
+        // field was capped independently (skip<=5, limit<=5), so skip=5&limit=5
+        // read posts at index 5-9, bypassing the cap.
+        isLimited = true;
+        maxPosts = 5;
+        if (skip >= maxPosts) {
+          const total = await postService.countPosts(query);
+          return res.status(200).json({
+            success: true,
+            message: 'Posts retrieved',
+            data: [],
+            meta: { isLimited, total: Math.min(total, maxPosts), skip, limit }
+          });
+        }
+        limit = Math.min(limit, maxPosts - skip);
       }
 
       const posts = await postService.listPosts(query, skip, limit, req.user?.id);
