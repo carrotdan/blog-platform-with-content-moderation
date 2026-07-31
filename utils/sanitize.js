@@ -45,19 +45,6 @@ function sanitizeHtml(html) {
   });
 }
 
-function sanitizeText(text) {
-  if (!text || typeof text !== 'string') {
-    return '';
-  }
-  
-  // Remove any HTML tags from plain text
-  return DOMPurify.sanitize(text, {
-    ALLOWED_TAGS: [],
-    ALLOWED_ATTR: []
-  });
-}
-
 module.exports = {
-  sanitizeHtml,
-  sanitizeText
+  sanitizeHtml
 };

@@ -2,78 +2,9 @@ const userService = require('../services/user.service');
 const followService = require('../services/follow.service');
 
 class UserController {
-  async register(req, res, next) {
-    try {
-      const data = await userService.register(req.body);
-      
-      // Send refresh token as HTTP Only cookie
-      res.cookie('refreshToken', data.tokens.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      res.status(201).json({
-        success: true,
-        message: 'User registered successfully',
-        data: {
-          user: data.user,
-          accessToken: data.tokens.accessToken
-        }
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async login(req, res, next) {
-    try {
-      const data = await userService.login(req.body);
-
-      res.cookie('refreshToken', data.tokens.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: {
-          user: data.user,
-          accessToken: data.tokens.accessToken
-        }
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async refreshToken(req, res, next) {
-    try {
-      const token = req.cookies?.refreshToken || req.body.refreshToken;
-      if (!token) {
-        return res.status(401).json({ success: false, message: 'Refresh token required', data: null });
-      }
-
-      const data = await userService.refreshToken(token);
-
-      res.cookie('refreshToken', data.tokens.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      res.status(200).json({
-        success: true,
-        message: 'Token refreshed',
-        data: { accessToken: data.tokens.accessToken }
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
+  // L27: register/login/refreshToken handlers removed — those flows live in
+  // controllers/auth.controller.js under /auth/* (the user.controller versions
+  // were unrouted dead code).
   async logout(req, res, next) {
     try {
       // C19: Revoke the refresh token server-side so it can no longer be used

@@ -55,13 +55,21 @@ class PostRepository {
     return Post.countDocuments({ author: authorId });
   }
 
+  // L31: only PUBLIC + PUBLISHED reposts count as shares — hidden/private
+  // (e.g. AI-flagged) reposts must not inflate the public share count.
   async countReposts(originalPostId) {
-    return Post.countDocuments({ original_post: originalPostId });
+    return Post.countDocuments({ original_post: originalPostId, visibility: 'PUBLIC', status: 'PUBLISHED' });
   }
 
   async countRepostsBatch(originalPostIds) {
     const results = await Post.aggregate([
-      { $match: { original_post: { $in: originalPostIds } } },
+      {
+        $match: {
+          original_post: { $in: originalPostIds },
+          visibility: 'PUBLIC',
+          status: 'PUBLISHED'
+        }
+      },
       { $group: { _id: '$original_post', count: { $sum: 1 } } }
     ]);
     return results.reduce((acc, r) => {

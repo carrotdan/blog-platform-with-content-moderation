@@ -18,11 +18,6 @@ jest.mock('../../services/ai.service', () => {
   });
   return {
     analyze,
-    analyzeAsync: jest.fn().mockResolvedValue({
-      spam_score: 0.05,
-      toxicity_score: 0.05,
-      label: 'PENDING_AI_REVIEW'
-    }),
     isHealthy: jest.fn().mockResolvedValue(true),
     getCircuitBreakerState: jest.fn().mockResolvedValue({ state: 'CLOSED', failures: 0, lastFailure: 0 }),
     recordFailure: jest.fn(),
@@ -35,8 +30,7 @@ jest.mock('../../services/ai.service', () => {
 // CJS runtime cannot load. Mock sanitize here; real behavior is covered by
 // tests/sanitize.test.js.
 jest.mock('../../utils/sanitize', () => ({
-  sanitizeHtml: (html) => String(html || '').replace(/<script[\s\S]*?<\/script>/gi, ''),
-  sanitizeText: (text) => String(text || '').replace(/<[^>]*>/g, '')
+  sanitizeHtml: (html) => String(html || '').replace(/<script[\s\S]*?<\/script>/gi, '')
 }));
 
 let mongoServer;
@@ -1231,6 +1225,160 @@ describe('Sprint 14 fixes (M32-M42)', () => {
     expect(violRes.status).toBe(200);
     expect(violRes.body.data.length).toBeLessThanOrEqual(1);
     expect(typeof violRes.body.meta.total).toBe('number');
+  });
+});
+
+describe('Sprint 15 fixes (L27-L32)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  test('L27: dead code is removed', () => {
+    const sanitize = require('../../utils/sanitize');
+    expect(sanitize.sanitizeText).toBeUndefined();
+    expect(sanitize.sanitizeHtml).toBeDefined();
+
+    const userController = require('../../controllers/user.controller');
+    expect(userController.register).toBeUndefined();
+    expect(userController.login).toBeUndefined();
+    expect(userController.refreshToken).toBeUndefined();
+    expect(userController.logout).toBeDefined();
+    expect(userController.updateProfile).toBeDefined();
+    expect(userController.getMe).toBeDefined();
+    expect(userController.getPublicProfile).toBeDefined();
+    expect(userController.getBookmarks).toBeDefined();
+  });
+
+  test('L28: swagger Notification.entity_model enum includes User', () => {
+    const { specs } = require('../../config/swagger');
+    const entityModel = specs.components.schemas.Notification.properties.entity_model.enum;
+    expect(entityModel).toEqual(['Post', 'Comment', 'User', 'Appeal']);
+  });
+
+  test('L29: repeated edits of a flagged post do not duplicate moderation-queue entries', async () => {
+    const owner = await createUser('l29@example.com', 'l29user');
+    const aiService = require('../../services/ai.service');
+    const postService = require('../../services/post.service');
+
+    // Exercised at the service level (not HTTP) to stay clear of the shared
+    // content-create rate limiter; the queue upsert is what L29 covers.
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    const created = await postService.createPost(owner._id, { content_html: '<p>l29 initial spam</p>', content_json: {} });
+    const postId = created._id;
+
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    await postService.updatePost(postId, { content_html: '<p>l29 still spam</p>' }, owner._id);
+
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    await postService.updatePost(postId, { content_html: '<p>l29 spam again</p>' }, owner._id);
+
+    const ModerationQueue = mongoose.model('ModerationQueue');
+    const count = await ModerationQueue.countDocuments({
+      target_model: 'Post',
+      target_id: postId,
+      status: 'PENDING'
+    });
+    expect(count).toBe(1);
+  });
+
+  test('L31: share counts exclude hidden/private reposts', async () => {
+    const author = await createUser('l31a@example.com', 'l31a');
+    const reposter = await createUser('l31b@example.com', 'l31b');
+    const authorToken = mintToken(author._id.toString());
+    const Post = mongoose.model('Post');
+
+    const original = await Post.create({
+      author: author._id,
+      slug: `l31-original-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>L31 original</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+    const postId = original._id;
+
+    // A PUBLIC repost counts as a share
+    await Post.create({
+      author: reposter._id,
+      slug: `l31-public-repost-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>public repost</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED',
+      original_post: postId
+    });
+
+    // A HIDDEN (moderated) repost of the same post must not be counted
+    await Post.create({
+      author: reposter._id,
+      slug: `l31-hidden-repost-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>hidden repost</p>',
+      visibility: 'HIDDEN',
+      status: 'PUBLISHED',
+      original_post: postId
+    });
+
+    const res = await request(app)
+      .get(`/api/v1/posts/${postId.toString()}`)
+      .set('Authorization', `Bearer ${authorToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.sharesCount).toBe(1);
+  });
+
+  test('L31: bookmark list total excludes hidden targets', async () => {
+    const user = await createUser('l31c@example.com', 'l31c');
+    const token = mintToken(user._id.toString());
+    const Post = mongoose.model('Post');
+
+    const p1 = await Post.create({
+      author: user._id,
+      slug: `l31-bm-1-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>l31 visible bookmark</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+    const p2 = await Post.create({
+      author: user._id,
+      slug: `l31-bm-2-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>l31 hidden bookmark</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+
+    for (const pid of [p1._id.toString(), p2._id.toString()]) {
+      const bm = await request(app)
+        .post('/api/v1/interactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ target_id: pid, target_model: 'Post', type: 'BOOKMARK' });
+      expect(bm.status).toBe(200);
+    }
+
+    await Post.findByIdAndUpdate(p2._id, { visibility: 'HIDDEN' });
+
+    const res = await request(app)
+      .get('/api/v1/users/me/bookmarks')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.meta.total).toBe(1);
+    const ids = res.body.data.map(p => p._id);
+    expect(ids).toContain(p1._id.toString());
+    expect(ids).not.toContain(p2._id.toString());
   });
 });
 

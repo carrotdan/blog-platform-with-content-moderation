@@ -28,6 +28,16 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = Path(__file__).parent.parent / "final_model"
 PORT = int(os.environ.get("AI_PORT", 8000))
 
+# L32: CORS origins are configurable via env (comma-separated) instead of being
+# hardcoded — deployers can point this at any API/CLIENT origin without editing
+# the source. Defaults keep the local dev setup working out of the box.
+DEFAULT_ALLOW_ORIGINS = "http://localhost:5000,http://localhost:3000"
+ALLOW_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("AI_ALLOW_ORIGINS", DEFAULT_ALLOW_ORIGINS).split(",")
+    if o.strip()
+]
+
 # Threshold to decide the label (based on test results)
 SPAM_THRESHOLD = 0.5    # LABEL_1 (L1)
 TOXIC_THRESHOLD = 0.5   # LABEL_0 (L0)
@@ -41,7 +51,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5000", "http://localhost:3000"],
+    allow_origins=ALLOW_ORIGINS,
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )

@@ -1,4 +1,4 @@
-const { sanitizeHtml, sanitizeText } = require('../utils/sanitize');
+const { sanitizeHtml } = require('../utils/sanitize');
 
 describe('HTML Sanitization', () => {
   describe('sanitizeHtml', () => {
@@ -63,19 +63,6 @@ describe('HTML Sanitization', () => {
       const input = '<a href="javascript:alert(1)">Click</a>';
       const output = sanitizeHtml(input);
       expect(output).not.toContain('javascript:');
-    });
-  });
-
-  describe('sanitizeText', () => {
-    test('should strip all HTML tags', () => {
-      const input = '<p>Hello <strong>world</strong></p>';
-      const output = sanitizeText(input);
-      expect(output).toBe('Hello world');
-    });
-
-    test('should handle empty input', () => {
-      expect(sanitizeText('')).toBe('');
-      expect(sanitizeText(null)).toBe('');
     });
   });
 });

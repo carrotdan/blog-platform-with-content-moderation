@@ -68,7 +68,6 @@ Blog posts with rich-text content stored in two parallel formats.
 | `visibility` | String enum | `PUBLIC` · `PRIVATE` · `HIDDEN` — default `PUBLIC` |
 | `reading_time` | Number | Minutes; calculated as `ceil(wordCount / 200)`, minimum 1 |
 | `cover_image` | String | URL |
-| `is_locked` | Boolean | Reserved field (not used in current logic) |
 | `is_sensitive` | Boolean | Set to `true` by AI or admin; shows a content warning overlay |
 | `tags` | String[] | Free-form tags; indexed for fast filtering |
 | `original_post` | ObjectId → `Post` | Self-reference for reposts; `null` on original posts |

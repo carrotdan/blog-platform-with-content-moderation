@@ -18,28 +18,6 @@ class UserService {
     };
   }
 
-  async login(data) {
-    const { email, password } = data;
-    const result = await authService.login(email, password);
-    return {
-      user: result.user,
-      tokens: {
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken
-      }
-    };
-  }
-
-  async refreshToken(token) {
-    const result = await authService.refreshToken(token);
-    return {
-      tokens: {
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken
-      }
-    };
-  }
-
   async updateProfile(user_id, data) {
     const updateData = {};
     if (data.avatar !== undefined) updateData.avatar = data.avatar;

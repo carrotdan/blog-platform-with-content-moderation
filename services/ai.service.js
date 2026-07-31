@@ -153,32 +153,6 @@ class AIService {
   }
 
   /**
-   * Async analyze - returns immediately with PENDING, processes in background
-   * @param {string} text - Text to analyze
-   * @param {Function} callback - Callback when analysis completes
-   */
-  async analyzeAsync(text, callback) {
-    // Return immediately with pending status
-    const pendingResult = { 
-      spam_score: 0.05, 
-      toxicity_score: 0.05, 
-      label: 'PENDING_AI_REVIEW' 
-    };
-    
-    // Process in background
-    setImmediate(async () => {
-      try {
-        const result = await this.analyze(text);
-        callback(null, result);
-      } catch (error) {
-        callback(error, null);
-      }
-    });
-    
-    return pendingResult;
-  }
-
-  /**
    * Check whether the Python AI service is running
    * @returns {Promise<boolean>}
    */

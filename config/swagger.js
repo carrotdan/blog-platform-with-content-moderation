@@ -126,7 +126,7 @@ const options = {
             sender: { $ref: '#/components/schemas/User', nullable: true },
             type: { type: 'string', enum: ['LIKE', 'COMMENT', 'FOLLOW', 'REPOST', 'REPLY', 'AI_MODERATION', 'APPEAL_RESOLVED'] },
             entity_id: { type: 'string' },
-            entity_model: { type: 'string', enum: ['Post', 'Comment', 'Appeal'] },
+            entity_model: { type: 'string', enum: ['Post', 'Comment', 'User', 'Appeal'] },
             metadata: { type: 'object' },
             is_read: { type: 'boolean' },
             createdAt: { type: 'string', format: 'date-time' }

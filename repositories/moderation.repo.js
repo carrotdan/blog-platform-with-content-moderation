@@ -7,8 +7,17 @@ const Comment = require('../models/Comment');
 const { getAuthorPopulate } = require('../utils/populate');
 
 class ModerationRepository {
+  // L29: Upsert per (target_model, target_id) while a PENDING entry exists —
+  // repeated edits of an already-flagged post used to create duplicate queue
+  // items. A REVIEWED item (resolved by a moderator) lets a new flag insert a
+  // fresh PENDING entry for the same target.
   async addToQueue(queueData) {
-    return ModerationQueue.create(queueData);
+    const { target_id, target_model, ...rest } = queueData;
+    return ModerationQueue.findOneAndUpdate(
+      { target_model, target_id, status: 'PENDING' },
+      { $set: { target_model, target_id, ...rest, status: 'PENDING' } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
   }
 
   async createLog(logData) {

@@ -57,6 +57,14 @@ module.exports = {
     io.on('connection', (socket) => {
       logger.info('Client connected', { socketId: socket.id, userId: socket.userId });
 
+      // L30: Auto-join the per-user room on connection so real-time events
+      // (notifications, messages) are not dropped when the client never emits
+      // join_user_room or emits it after an event fires.
+      if (socket.userId) {
+        socket.join(socket.userId.toString());
+      }
+
+      // Kept for backward compatibility; joining again is a no-op.
       socket.on('join_user_room', () => {
         if (socket.userId) {
           socket.join(socket.userId.toString());

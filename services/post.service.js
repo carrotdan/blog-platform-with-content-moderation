@@ -1,6 +1,7 @@
 const postRepository = require('../repositories/post.repo');
 const interactionRepository = require('../repositories/interaction.repo');
 const Post = require('../models/Post');
+const mongoose = require('mongoose');
 const moderationRepository = require('../repositories/moderation.repo');
 const userRepository = require('../repositories/user.repo');
 const notificationService = require('./notification.service');
@@ -461,15 +462,33 @@ async updatePost(id, data, user_id) {
 
   async getBookmarkedPosts(user_id, skip = 0, limit = 10) {
     const Interaction = require('../models/Interaction');
+    // Aggregate $match stages are not auto-cast by Mongoose, so convert the
+    // string userId (from req.user.id) to an ObjectId before matching.
+    const userObjId = typeof user_id === 'string' ? new mongoose.Types.ObjectId(user_id) : user_id;
     
-    const total = await Interaction.countDocuments({ user_id, type: 'BOOKMARK', target_model: 'Post' });
+    // L31: total must only count bookmarks whose target post still exists and
+    // is not HIDDEN — deleted/moderated targets were previously counted even
+    // though they can never be returned, making pagination meta inaccurate.
+    const [totalAgg] = await Interaction.aggregate([
+      { $match: { user_id: userObjId, type: 'BOOKMARK', target_model: 'Post' } },
+      { $lookup: { from: 'posts', localField: 'target_id', foreignField: '_id', as: 'post' } },
+      { $unwind: '$post' },
+      { $match: { 'post.visibility': { $ne: 'HIDDEN' }, 'post.status': 'PUBLISHED' } },
+      { $count: 'total' }
+    ]);
+    const total = totalAgg ? totalAgg.total : 0;
+
     const interactions = await Interaction.find({ user_id, type: 'BOOKMARK', target_model: 'Post' })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
     const postIds = interactions.map(i => i.target_id);
     
-    const posts = await Post.find({ _id: { $in: postIds } }).populate('author', 'username avatar');
+    const posts = await Post.find({
+      _id: { $in: postIds },
+      visibility: { $ne: 'HIDDEN' },
+      status: 'PUBLISHED'
+    }).populate('author', 'username avatar');
     
     // Maintain the order of bookmarks
     const postMap = posts.reduce((acc, post) => {
@@ -478,7 +497,8 @@ async updatePost(id, data, user_id) {
     }, {});
     
     const orderedPosts = postIds.map(id => postMap[id.toString()]).filter(Boolean);
-    return { posts: this._enrichPosts(orderedPosts, user_id), total };
+    const enriched = await this._enrichPosts(orderedPosts, user_id);
+    return { posts: enriched, total };
   }
 
   async _enrichPosts(posts, current_user_id) {
