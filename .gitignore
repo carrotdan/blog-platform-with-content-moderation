@@ -17,6 +17,11 @@ uploads/
 # Test coverage
 coverage/
 
+# Internal session/dev notes (not part of the project)
+CLAUDE.md
+progress.md
+BUG_REVIEW_AND_FIX_PLAN.md
+
 # OS / editor
 .DS_Store
 Thumbs.db
