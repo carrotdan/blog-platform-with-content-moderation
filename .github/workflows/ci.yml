@@ -41,7 +41,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python deps
-        run: pip install pytest httpx fastapi torch transformers pydantic
+        run: pip install pytest httpx fastapi uvicorn torch transformers pydantic
 
       - name: Run AI service tests
         run: npm run test:ai
