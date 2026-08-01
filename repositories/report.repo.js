@@ -6,8 +6,16 @@ class ReportRepository {
     return Report.create(reportData);
   }
 
-  async findAll(query = {}) {
-    return Report.find(query).populate(getReporterPopulate()).sort({ createdAt: -1 });
+  async findAll(query = {}, skip = 0, limit = 50) {
+    return Report.find(query)
+      .populate(getReporterPopulate())
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+  }
+
+  async countAll(query = {}) {
+    return Report.countDocuments(query);
   }
 
   async findById(id) {

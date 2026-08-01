@@ -1873,3 +1873,167 @@ describe('Sprint 18 fixes (M43-M51)', () => {
   });
 });
 
+describe('Sprint 20 fixes (H50-H51, M52-M55, L39-L40)', () => {
+  const mintToken = (userId, role = 'USER') => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign(
+      { userId, role, jti: require('crypto').randomUUID() },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: '15m' }
+    );
+  };
+
+  const createUser = async (email, username) => {
+    const User = mongoose.model('User');
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash('password123', 10);
+    const doc = await User.create({ email, username, password: hash, role: 'USER' });
+    return doc;
+  };
+
+  test('H50: a visibility-only update toggles PUBLIC<->PRIVATE', async () => {
+    const owner = await createUser('h50@example.com', 'h50user');
+    const postService = require('../../services/post.service');
+    const aiService = require('../../services/ai.service');
+
+    const created = await postService.createPost(owner._id, { content_html: '<p>h50 body</p>', content_json: {} });
+    expect(created.visibility).toBe('PUBLIC');
+
+    // No content change — only visibility. Previously the field was silently
+    // ignored because visibility was computed only when content changed.
+    const priv = await postService.updatePost(created._id, { visibility: 'PRIVATE' }, owner._id);
+    expect(priv.visibility).toBe('PRIVATE');
+
+    const pub = await postService.updatePost(created._id, { visibility: 'PUBLIC' }, owner._id);
+    expect(pub.visibility).toBe('PUBLIC');
+  });
+
+  test('H50 + H33: a HIDDEN post cannot be unhidden via an edit', async () => {
+    const owner = await createUser('h50hidden@example.com', 'h50hidden');
+    const postService = require('../../services/post.service');
+    const aiService = require('../../services/ai.service');
+
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    const hidden = await postService.createPost(owner._id, { content_html: '<p>h50 spam</p>', content_json: {} });
+    expect(hidden.visibility).toBe('HIDDEN');
+
+    // Attempt to force it back to PUBLIC via a visibility-only edit → must stay HIDDEN
+    const res = await postService.updatePost(hidden._id, { visibility: 'PUBLIC' }, owner._id);
+    expect(res.visibility).toBe('HIDDEN');
+  });
+
+  test('H51: bookmark list excludes PRIVATE posts not owned by the viewer', async () => {
+    const owner = await createUser('h51@example.com', 'h51owner');
+    const other = await createUser('h51other@example.com', 'h51other');
+    const Post = mongoose.model('Post');
+    const Interaction = mongoose.model('Interaction');
+
+    // owner bookmarks other's PUBLIC post, then other makes it PRIVATE
+    const p1 = await Post.create({ author: other._id, slug: `h51a-${Date.now()}`, content_json: {}, content_html: '<p>a</p>', visibility: 'PUBLIC', status: 'PUBLISHED' });
+    await Interaction.create({ user_id: owner._id, target_id: p1._id, target_model: 'Post', type: 'BOOKMARK' });
+    await Post.findByIdAndUpdate(p1._id, { visibility: 'PRIVATE' });
+
+    const token = mintToken(owner._id.toString());
+    const res = await request(app)
+      .get('/api/v1/users/me/bookmarks')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.meta.total).toBe(0);
+
+    // owner's own post they made PRIVATE still appears in their own list
+    const own = await Post.create({ author: owner._id, slug: `h51b-${Date.now()}`, content_json: {}, content_html: '<p>own</p>', visibility: 'PUBLIC', status: 'PUBLISHED' });
+    await Interaction.create({ user_id: owner._id, target_id: own._id, target_model: 'Post', type: 'BOOKMARK' });
+    await Post.findByIdAndUpdate(own._id, { visibility: 'PRIVATE' });
+
+    const res2 = await request(app)
+      .get('/api/v1/users/me/bookmarks')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res2.status).toBe(200);
+    expect(res2.body.meta.total).toBe(1);
+  });
+
+  test('M53: admin report listings are paginated', async () => {
+    const admin = await createUser('m53admin@example.com', 'm53admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'ADMIN' });
+    const adminToken = mintToken(admin._id.toString(), 'ADMIN');
+
+    const res = await request(app)
+      .get('/api/v1/reports?limit=2')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(typeof res.body.meta.total).toBe('number');
+    expect(res.body.meta.limit).toBe(2);
+  });
+
+  test('M54: admin post listing is paginated', async () => {
+    const admin = await createUser('m54admin@example.com', 'm54admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'ADMIN' });
+    const adminToken = mintToken(admin._id.toString(), 'ADMIN');
+
+    const res = await request(app)
+      .get('/api/v1/admin/posts?limit=2')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(typeof res.body.meta.total).toBe('number');
+    expect(res.body.meta.limit).toBe(2);
+  });
+
+  test('M55: the moderation queue is paginated', async () => {
+    const author = await createUser('m55author@example.com', 'm55author');
+    const postService = require('../../services/post.service');
+    const aiService = require('../../services/ai.service');
+    aiService.analyze.mockResolvedValueOnce({ spam_score: 0.9, toxicity_score: 0.1, label: 'SPAM' });
+    await postService.createPost(author._id, { content_html: '<p>m55 spam</p>', content_json: {} });
+
+    const mod = await createUser('m55mod@example.com', 'm55mod');
+    await mongoose.model('User').findByIdAndUpdate(mod._id, { role: 'MODERATOR' });
+    const modToken = mintToken(mod._id.toString(), 'MODERATOR');
+
+    const res = await request(app)
+      .get('/api/v1/moderation/queue?limit=1')
+      .set('Authorization', `Bearer ${modToken}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBeLessThanOrEqual(1);
+    expect(res.body.meta.limit).toBe(1);
+  });
+
+  test('L40: resolving a report via /reports records the acting moderator', async () => {
+    const admin = await createUser('l40admin@example.com', 'l40admin');
+    await mongoose.model('User').findByIdAndUpdate(admin._id, { role: 'ADMIN' });
+    const adminToken = mintToken(admin._id.toString(), 'ADMIN');
+
+    const targetOwner = await createUser('l40owner@example.com', 'l40owner');
+    const reporter = await createUser('l40rep@example.com', 'l40rep');
+    const reporterToken = mintToken(reporter._id.toString());
+    const Post = mongoose.model('Post');
+    const post = await Post.create({
+      author: targetOwner._id,
+      slug: `l40-post-${Date.now()}`,
+      content_json: {},
+      content_html: '<p>x</p>',
+      visibility: 'PUBLIC',
+      status: 'PUBLISHED'
+    });
+
+    const reportRes = await request(app)
+      .post('/api/v1/reports')
+      .set('Authorization', `Bearer ${reporterToken}`)
+      .send({ target_id: post._id.toString(), target_model: 'Post', reason: 'spam' });
+    expect(reportRes.status).toBe(201);
+
+    const res = await request(app)
+      .put(`/api/v1/reports/${reportRes.body.data._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'RESOLVED' });
+    expect(res.status).toBe(200);
+
+    const ModerationLog = mongoose.model('ModerationLog');
+    const log = await ModerationLog.findOne({ target_id: post._id, action: 'HIDE' });
+    expect(log).toBeTruthy();
+    expect(log.moderator_id.toString()).toBe(admin._id.toString());
+  });
+});
+

@@ -13,8 +13,9 @@ class ModerationService {
     });
   }
 
-  async getQueue() {
-    const queue = await moderationRepository.getPendingQueue();
+  // M55: page the queue instead of loading every PENDING item.
+  async getQueue(skip = 0, limit = 50) {
+    const queue = await moderationRepository.getPendingQueue(skip, limit);
     // Filter out items where the target content was deleted
     return queue.filter(item => item.target_id !== null);
   }

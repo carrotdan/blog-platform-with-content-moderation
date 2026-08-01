@@ -318,6 +318,16 @@ async updatePost(id, data, user_id) {
     }
     if (data.tags) updateData.tags = data.tags;
 
+    // H50: apply the requested visibility on every edit — previously it was only
+    // computed when the content itself changed, so a visibility-only edit
+    // (PUBLIC↔PRIVATE toggle) was silently ignored. H33 still wins: a HIDDEN
+    // post stays HIDDEN no matter what the client sends (only a moderator can
+    // restore it), and AI-flagged edits below re-hide it.
+    const requestedVisibility = post.visibility === 'HIDDEN'
+      ? 'HIDDEN'
+      : (data.visibility || post.visibility || 'PUBLIC');
+    updateData.visibility = requestedVisibility;
+
     // H32: Re-run AI moderation whenever the title or body changes (a title-only
     // edit previously skipped analysis, letting users retitle posts with
     // toxic/spam text that stayed PUBLIC with stale scores).
@@ -347,10 +357,6 @@ async updatePost(id, data, user_id) {
         // approval). Editing a hidden post to clean content keeps it HIDDEN.
         if (isFlagged) {
           updateData.visibility = 'HIDDEN';
-        } else if (post.visibility === 'HIDDEN') {
-          updateData.visibility = 'HIDDEN';
-        } else {
-          updateData.visibility = data.visibility || post.visibility || 'PUBLIC';
         }
 
         if (isFlagged) {
@@ -534,7 +540,16 @@ async updatePost(id, data, user_id) {
     // lookup filtered afterwards, so a page could silently contain fewer (or
     // zero) posts while still advancing the cursor. Both total and page are
     // now computed against the same filtered set via a $lookup+$match pipeline.
-    const matchFilter = { 'post.visibility': { $ne: 'HIDDEN' }, 'post.status': 'PUBLISHED' };
+    // H51: only PUBLIC posts (or the viewer's own) qualify — a post the author
+    // later made PRIVATE must not stay exposed in someone else's bookmark list.
+    const matchFilter = {
+      'post.status': 'PUBLISHED',
+      'post.visibility': { $ne: 'HIDDEN' },
+      $or: [
+        { 'post.visibility': 'PUBLIC' },
+        { 'post.author': userObjId }
+      ]
+    };
 
     const [totalAgg, page] = await Promise.all([
       Interaction.aggregate([

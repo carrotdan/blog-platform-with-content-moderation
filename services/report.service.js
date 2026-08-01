@@ -48,8 +48,14 @@ class ReportService {
     });
   }
 
-  async getAllReports(query = {}) {
-    return reportRepository.findAll(query);
+  // M53: admin listings must be bounded — returning the whole reports
+  // collection grows without limit as users report content.
+  async getAllReports(query = {}, skip = 0, limit = 50) {
+    const [reports, total] = await Promise.all([
+      reportRepository.findAll(query, skip, limit),
+      reportRepository.countAll(query)
+    ]);
+    return { reports, total };
   }
 
   // H48: single, consistent resolution path. The legacy report.controller

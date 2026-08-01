@@ -97,7 +97,18 @@ class AuthService {
       bio
     });
 
-    await newUser.save();
+    // M52: the pre-check above catches the common duplicate, but two concurrent
+    // registrations with the same email can both pass it and only one save wins.
+    // Map that race's E11000 to the same friendly message instead of leaking a
+    // raw Mongo duplicate-key string.
+    try {
+      await newUser.save();
+    } catch (err) {
+      if (err && err.code === 11000) {
+        throw new Error('User already exists');
+      }
+      throw err;
+    }
 
     // M51: registration is atomic — the account and its tokens are created
     // together, so a failed post-registration login can no longer strand an

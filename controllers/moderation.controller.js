@@ -16,8 +16,11 @@ class ModerationController {
 
   async getQueue(req, res, next) {
     try {
-      const queue = await moderationService.getQueue();
-      res.status(200).json({ success: true, message: 'Queue retrieved', data: queue });
+      // M55: paginated queue listing.
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const queue = await moderationService.getQueue(skip, limit);
+      res.status(200).json({ success: true, message: 'Queue retrieved', data: queue, meta: { skip, limit } });
     } catch (error) {
       next(error);
     }

@@ -24,8 +24,13 @@ class ModerationRepository {
     return ModerationLog.create(logData);
   }
 
-  async getPendingQueue() {
-    const items = await ModerationQueue.find({ status: 'PENDING' }).sort({ createdAt: -1 });
+  // M55: the pending queue can grow unbounded as content gets flagged — always
+  // page it (a cap of 100 keeps the moderation view responsive).
+  async getPendingQueue(skip = 0, limit = 50) {
+    const items = await ModerationQueue.find({ status: 'PENDING' })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
     return this._populateTargets(items);
   }
 

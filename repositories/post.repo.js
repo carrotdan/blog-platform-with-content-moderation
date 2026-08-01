@@ -99,6 +99,10 @@ class PostRepository {
       .sort({ createdAt: -1 });
   }
 
+  async countAll() {
+    return Post.countDocuments();
+  }
+
   async findByIdAdmin(id) {
     return Post.findById(id).populate(getAuthorPopulate(true));
   }

@@ -84,6 +84,16 @@ class AuthController {
         message: 'Token refreshed successfully'
       });
     } catch (error) {
+      // L39: a failed refresh (expired/revoked token) should not leave a stale
+      // cookie behind — clear it so the client does not keep re-sending a
+      // dead token and the user is forced back to login.
+      if (req.cookies?.refreshToken) {
+        res.clearCookie('refreshToken', {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax'
+        });
+      }
       res.status(401).json({
         success: false,
         message: error.message

@@ -14,14 +14,14 @@ router.get('/users', validate(paginationSchema), adminController.getUsers);
 // MODERATORs may review content but must not escalate privileges.
 router.put('/users/:id/role', authorize('ADMIN'), validate(idParamSchema), adminController.changeRole);
 
-router.get('/posts', adminController.getPosts);
+router.get('/posts', validate(paginationSchema), adminController.getPosts);
 router.put('/posts/:id/hide', validate(idParamSchema), adminController.hidePost);
 router.put('/posts/:id/unhide', validate(idParamSchema), adminController.unhidePost);
 router.put('/posts/:id/mark-sensitive', validate(idParamSchema), adminController.markSensitive);
 router.put('/posts/:id/unmark-sensitive', validate(idParamSchema), adminController.unmarkSensitive);
 router.delete('/posts/:id', validate(idParamSchema), adminController.deletePost);
 
-router.get('/reports', adminController.getReports);
+router.get('/reports', validate(paginationSchema), adminController.getReports);
 router.put('/reports/:id/resolve', validate(adminResolveReportSchema), adminController.resolveReport);
 
 router.put('/users/:id/mute', authorize('ADMIN'), validate(idParamSchema), adminController.muteUser);

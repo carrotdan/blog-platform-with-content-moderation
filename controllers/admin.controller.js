@@ -59,8 +59,14 @@ class AdminController {
 
   async getPosts(req, res, next) {
     try {
-      const posts = await postRepository.findAdminAll(0, 50);
-      res.status(200).json({ success: true, message: 'All posts retrieved', data: posts });
+      // M54: paginate the admin post listing (was hardcoded to 50 posts).
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const [posts, total] = await Promise.all([
+        postRepository.findAdminAll(skip, limit),
+        postRepository.countAll()
+      ]);
+      res.status(200).json({ success: true, message: 'All posts retrieved', data: posts, meta: { total, skip, limit } });
     } catch (error) {
       next(error);
     }
@@ -112,8 +118,14 @@ class AdminController {
 
   async getReports(req, res, next) {
     try {
-      const reports = await moderationRepository.findReports({ status: 'PENDING' }, 0, 50);
-      res.status(200).json({ success: true, message: 'Reports retrieved', data: reports });
+      // M53: paginate the pending-reports listing (was hardcoded to 50).
+      const skip = Number(req.query.skip) || 0;
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const [reports, total] = await Promise.all([
+        moderationRepository.findReports({ status: 'PENDING' }, skip, limit),
+        moderationRepository.getReportCount({ status: 'PENDING' })
+      ]);
+      res.status(200).json({ success: true, message: 'Reports retrieved', data: reports, meta: { total, skip, limit } });
     } catch (error) {
       next(error);
     }
