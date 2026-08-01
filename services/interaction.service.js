@@ -67,9 +67,22 @@ class InteractionService {
       const target = await this._validateTarget(target_id, target_model, user_id);
 
       // Toggle on
-      const interaction = await interactionRepository.create({
-        user_id, target_id, target_model, type
-      });
+      let interaction;
+      try {
+        interaction = await interactionRepository.create({
+          user_id, target_id, target_model, type
+        });
+      } catch (err) {
+        // L37: a concurrent double-like can both pass the "not exists" check and
+        // one hits the unique index (E11000). Treat it as the second toggle —
+        // remove the row the concurrent request created, keeping the toggle
+        // invariant (two like requests ⇒ unliked) instead of a 400 crash.
+        if (err && err.code === 11000) {
+          await interactionRepository.delete(user_id, target_id, type);
+          return { success: true, action: 'removed' };
+        }
+        throw err;
+      }
 
       if (type === 'LIKE') {
         let authorId = null;
@@ -101,13 +114,19 @@ class InteractionService {
     // Validate the post is visible before bookmarking
     await this._validateTarget(post_id, 'Post', user_id);
 
-    const interaction = await interactionRepository.create({
-      user_id,
-      target_id: post_id,
-      target_model: 'Post',
-      type: 'BOOKMARK'
-    });
-    return { success: true, action: 'added', interaction };
+    try {
+      const interaction = await interactionRepository.create({
+        user_id,
+        target_id: post_id,
+        target_model: 'Post',
+        type: 'BOOKMARK'
+      });
+      return { success: true, action: 'added', interaction };
+    } catch (err) {
+      // L37: idempotent — a concurrent request already created the bookmark.
+      if (err && err.code === 11000) return { success: true, action: 'already_saved' };
+      throw err;
+    }
   }
 
   async removeBookmark(user_id, post_id) {

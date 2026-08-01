@@ -1,5 +1,6 @@
 const socketIo = require('socket.io');
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 const logger = require('../utils/logger');
 
 let io;
@@ -35,7 +36,7 @@ module.exports = {
     });
 
     // Auth middleware for socket connections
-    io.use((socket, next) => {
+    io.use(async (socket, next) => {
       // L21: Only accept the token via handshake.auth — never via query string,
       // which would leak the access token into logs/history.
       const token = socket.handshake.auth.token;
@@ -46,7 +47,15 @@ module.exports = {
       
       try {
         const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-        socket.userId = decoded.userId || decoded.id;
+        const userId = decoded.userId || decoded.id;
+        // L33: a valid JWT is not enough — the account must still exist and be
+        // in a connectable state. A BANNED (or soft-deleted) user must not be
+        // able to open a live channel and receive real-time events.
+        const user = await User.findById(userId).select('status isDeleted _id');
+        if (!user || user.isDeleted || user.status === 'BANNED') {
+          return next(new Error('Account is not active'));
+        }
+        socket.userId = userId;
         socket.userRole = decoded.role;
         next();
       } catch (err) {

@@ -443,6 +443,7 @@ async updatePost(id, data, user_id) {
     const ModerationQueue = require('../models/ModerationQueue');
     const Report = require('../models/Report');
     const Appeal = require('../models/Appeal');
+    const Notification = require('../models/Notification');
 
     const reposts = await Post.find({ original_post: postId });
     for (const repost of reposts) {
@@ -453,6 +454,16 @@ async updatePost(id, data, user_id) {
 
     const comments = await Comment.find({ post_id: postId }).select('_id');
     const commentIds = comments.map(c => c._id);
+
+    // L35: collect the appeals being deleted so notifications pointing at them
+    // can be cleaned up too — a recipient must never be left tapping a dead id.
+    const appeals = await Appeal.find({
+      $or: [
+        { target_model: 'Post', target_id: postId },
+        { target_model: 'Comment', target_id: { $in: commentIds } }
+      ]
+    }).select('_id');
+    const appealIds = appeals.map(a => a._id);
 
     await Interaction.deleteMany({
       $or: [
@@ -481,6 +492,17 @@ async updatePost(id, data, user_id) {
       $or: [
         { target_model: 'Post', target_id: postId },
         { target_model: 'Comment', target_id: { $in: commentIds } }
+      ]
+    });
+
+    // L35: drop notifications whose entity was just removed so no dangling
+    // entity_id remains. Deleting a post also removes its comments and any
+    // appeals on them, so all three entity models are covered.
+    await Notification.deleteMany({
+      $or: [
+        { entity_model: 'Post', entity_id: postId },
+        { entity_model: 'Comment', entity_id: { $in: commentIds } },
+        { entity_model: 'Appeal', entity_id: { $in: appealIds } }
       ]
     });
   }

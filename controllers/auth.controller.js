@@ -2,7 +2,12 @@ const authService = require('../services/auth.service');
 const userService = require('../services/user.service');
 
 // L24: Consistent httpOnly refresh cookie + JSON contract across all auth routes
-const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+// L34: the cookie lifetime must follow JWT_REFRESH_EXPIRE (was hardcoded to 7
+// days) so a shorter configured expiry actually expires the cookie sooner.
+const REFRESH_COOKIE_MAX_AGE = authService.parseDurationToMs(
+  process.env.JWT_REFRESH_EXPIRE,
+  7 * 24 * 60 * 60 * 1000
+);
 
 function setRefreshCookie(res, refreshToken) {
   res.cookie('refreshToken', refreshToken, {

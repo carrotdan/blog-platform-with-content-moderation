@@ -59,7 +59,9 @@ class UserService {
     const followingIds = following.map(f => ((f.following_id && f.following_id._id) || f.following_id).toString());
     followingIds.push(userId.toString());
 
-    return User.find({ _id: { $nin: followingIds }, isDeleted: false })
+    // L36: never suggest accounts that cannot be interacted with (BANNED) — a
+    // follower would otherwise be recommended a user they can't follow/read.
+    return User.find({ _id: { $nin: followingIds }, isDeleted: false, status: { $ne: 'BANNED' } })
       .select('username avatar bio')
       .limit(limit);
   }
