@@ -6,7 +6,8 @@
     "start": "node app.js",
     "dev": "nodemon app.js",
     "test": "jest --detectOpenHandles --forceExit",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:ai": "cd ai_service && python3 -m pytest test_main.py -v"
   },
   "keywords": [],
   "author": "",
